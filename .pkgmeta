@@ -1,0 +1,9 @@
+package-as: XLoot
+
+move-folders:
+  XLoot/XLoot: XLoot
+  XLoot/XLoot_Frame: XLoot_Frame
+  XLoot/XLoot_Group: XLoot_Group
+  XLoot/XLoot_Master: XLoot_Master
+  XLoot/XLoot_Monitor: XLoot_Monitor
+  XLoot/XLoot_Options: XLoot_Options
