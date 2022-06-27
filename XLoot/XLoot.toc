@@ -1,6 +1,6 @@
 ## Interface: 90205
 ## Interface-Classic: 11400
-## Interface-BCC: 20502
+## Interface-BCC: 20504
 ## Title: XLoot
 ## Notes: Core module for Loot and Looting-related UI improvements
 ## Version: 9.2.5-3
