@@ -1,12 +1,18 @@
-tag 7d35946ca352d2d2778e6c19eb7dcadc52ffb5c4 10.1-1
+tag 2898a59c684144cd5fc16fe06407d186803a4923 12-1
 Author:	Xuerian <xuerian@gmail.com>
-Date:	Sun May 28 14:28:31 2023 -0400
+Date:	Sat Jan 24 00:17:03 2026 -0500
 
-Prevent Group from loading until updated
+TOC bump
 
-commit 45c3be08d65097b0676ca7a5fa7598f7a7a6058f
-Author: Xuerian <xuerian@gmail.com>
-Date:   Sun May 28 14:23:16 2023 -0400
+commit 1126a53e95197256d9544de578dcfa81157b05d8
+Author: Xuerian <Xuerian@users.noreply.github.com>
+Date:   Sat Jan 24 00:00:41 2026 -0500
 
-    Bump TOC, do not load Group on recent versions until updated
+    Bump toc for Midnight. Functionality not confirmed.
+
+commit 1126a53e95197256d9544de578dcfa81157b05d8
+Author: Xuerian <Xuerian@users.noreply.github.com>
+Date:   Sat Jan 24 00:00:41 2026 -0500
+
+    Bump toc for Midnight. Functionality not confirmed.
 

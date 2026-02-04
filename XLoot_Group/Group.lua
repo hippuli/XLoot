@@ -17,6 +17,7 @@ local BUILD_NUMBER = select(4, GetBuildInfo())
 local BUILD_HAS_DISENCHANT = BUILD_NUMBER >= 30300
 local BUILD_HAS_TRANSMOG_GREED = BUILD_NUMBER >= 49407
 
+local GetItemInfo = C_Item and C_Item.GetItemInfo or GetItemInfo
 
 -------------------------------------------------------------------------------
 -- Settings
@@ -97,19 +98,21 @@ function addon:OnInitialize()
 end
 
 function addon:OnEnable()
+	if BUILD_NUMBER >= 100000 then
+		print("XLoot Group does not yet work on this version and will not be loaded")
+		return
+	end
 	-- Register events
 	eframe:RegisterEvent('START_LOOT_ROLL')
 	eframe:RegisterEvent('MODIFIER_STATE_CHANGED')
 
-	if BUILD_HAS_TRANSMOG_GREED then
-		print("XLoot Group does not yet work on this version and will not be loaded")
-		return
-		eframe:RegisterEvent('LOOT_HISTORY_UPDATE_DROP')
-	else
+	-- if BUILD_HAS_TRANSMOG_GREED or C_Item then
+	-- 	eframe:RegisterEvent('LOOT_HISTORY_UPDATE_DROP')
+	-- else
 		eframe:RegisterEvent('LOOT_HISTORY_ROLL_CHANGED')
 		eframe:RegisterEvent('LOOT_HISTORY_ROLL_COMPLETE')
 		eframe:RegisterEvent('LOOT_ROLLS_COMPLETE')
-	end
+	-- end
 
 	-- Disable default frame
 	UIParent:UnregisterEvent("START_LOOT_ROLL")
@@ -211,7 +214,7 @@ function addon:START_LOOT_ROLL(id, length, uid, ongoing)
 		return
 	end
 	local link = GetLootRollItemLink(id)
-	local r, g, b = GetItemQualityColor(quality)
+	local r, g, b = C_Item.GetItemQualityColor(quality)
 
 	local start = length
 	if ongoing then
@@ -973,7 +976,7 @@ function addon:SkinUpdate()
 		bar:SetStatusBarTexture(skin.bar_texture)
 		local link = bar.parent.link
 		if link then
-			local r, g, b = GetItemQualityColor(select(3, GetItemInfo(link)))
+			local r, g, b = C_Item.GetItemQualityColor(select(3, GetItemInfo(link)))
 			bar.parent.overlay:SetBorderColor(r, g, b)
 			bar.parent.icon_frame:SetBorderColor(r, g, b)
 		end

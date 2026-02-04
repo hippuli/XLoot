@@ -10,6 +10,8 @@ local CopperToString, FancyPlayerName = XLoot.CopperToString, XLoot.FancyPlayerN
 local table_insert, table_remove = table.insert, table.remove
 local me = UnitName("player")
 
+local GetItemInfo = C_Item and C_Item.GetItemInfo or GetItemInfo
+
 -------------------------------------------------------------------------------
 -- Settings
 
@@ -111,7 +113,7 @@ function events.item(player, link, num)
 		if (player == me and opt.threshold_own or opt.threshold_other) > quality then
 			return -- Doesn't meet threshold requirements
 		end
-		local r, g, b = GetItemQualityColor(quality)
+		local r, g, b = C_Item.GetItemQualityColor(quality)
 		local nr, ng, nb
 		if player ~= me then
 			player, nr, ng, nb = FancyPlayerName(player, select(2, UnitClass(player)), opt)
@@ -139,7 +141,7 @@ end
 
 function events.coin(coin_string, copper)
 	if opt.show_coin then
-		addon:AddRow(GetCoinIcon(copper), opt.fade_own, .5, .5, .5, .5, .5, .5):SetTexts(nil, CopperToString(copper))
+		addon:AddRow(C_CurrencyInfo.GetCoinIcon(copper), opt.fade_own, .5, .5, .5, .5, .5, .5):SetTexts(nil, CopperToString(copper))
 	end
 end
 
@@ -190,7 +192,7 @@ function addon.EframeUpdate(self, elapsed)
 				if opt.use_altoholic and Altoholic then
 					total = Altoholic:GetItemCount(Altoholic:GetIDFromLink(row.item))
 				else
-					total = GetItemCount(row.item)
+					total = C_Item.GetItemCount(row.item)
 				end
 				if total and total > 1 then
 					row.total:SetText(numberize(total))
