@@ -328,6 +328,10 @@ function addon:OnEnable() -- Construct addon option tables here
 			opts.name = opts.name or L[module_data.name][key] or L[key] or key
 			opts.desc = opts.desc or L[module_data.name][key.."_desc"]
 
+			if opts.type == "range" or opts.type == "input" then
+				opts.desc = opts.desc and (opts.desc.."\n\n"..L.enter_to_save) or L.enter_to_save
+			end
+
 			meta.subtable, meta.subkey = opts.subtable, opts.subkey
 			opts.subtable, opts.subkey = nil, nil
 
@@ -408,6 +412,8 @@ function addon:OnEnable() -- Construct addon option tables here
 			return skins
 		end},
 		{ "skin_anchors", "toggle" },
+		{ "reset_defaults", "execute", confirm = true, func = function() addon:ResetProfile() end },
+		{ "discord", "execute", func = function() XLoot:ShowDiscord() end },
 		-- { "module_header", "header" },
 	}))
 	self.config.args = options
@@ -472,7 +478,7 @@ function addon:OnEnable() -- Construct addon option tables here
 	end
 
 	local font_flag = {
-		{ "", "NONE" },
+		{ "", NONE },
 		{ "OUTLINE", "OUTLINE" },
 		{ "THICKOUTLINE", "THICKOUTLINE" },
 		{ "MONOCHROME", "MONOCHROME" }
@@ -512,9 +518,10 @@ function addon:OnEnable() -- Construct addon option tables here
 				{ "loot_highlight", width = "double", },
 				{ "loot_collapse" },
 				{ "loot_texts_lock", width = "double" },
+				{ "loot_texts_sell" },
 				{ "loot_buttons_auto" },
 				{ "loot_alpha", "alpha" },
-				{ "loot_icon_size", "range", 16, 64, 1, name = L.icon_size },
+				{ "loot_icon_size", "range", 16, 64, 1 },
 				{ "loot_row_height", "range", 14, 64, 1 },
 				{ "loot_padding", "header", name = L.padding },
 				{ "loot_padding_top", "range", 0, 25, 1, name = L.top },
@@ -548,9 +555,16 @@ function addon:OnEnable() -- Construct addon option tables here
 			}},
 			{ "autolooting", "group", {
 				{ "autolooting_text", "description" },
+				{ "speedy_autoloot", "toggle", width = "double" },
+				{ "speedy_autoloot_respect_filters", "toggle", width = "double", requires = "speedy_autoloot" },
 				{ "autoloot_currency", when_group, "autoloots", "currency" },
 				{ "autoloot_quest", when_group, "autoloots", "quest" },
 				{ "autoloot_tradegoods", when_group, "autoloots", "tradegoods" },
+				{ "autoloot_gear", when_group, "autoloots", "gear" },
+				{ "autoloot_gear_quality", item_qualities },
+				{ "autoloot_gear_minlevel", "range", 0, 1000, 5 },
+				{ "autoloot_value", when_group, "autoloots", "value" },
+				{ "autoloot_value_minprice", "range", 0, 100000, 1, 0, 1000, 50 },
 				{ "autoloot_all", when_group, "autoloots", "all" },
 				{ "autolooting_list", "description" },
 				{ "autoloot_list", when_group, "autoloots", "list" },
@@ -667,6 +681,9 @@ function addon:OnEnable() -- Construct addon option tables here
 				{ "font_size_ilvl", "range", 4, 26, 1 },
 			}},
 			{ "colors", "group", {
+				{ "quality_color", width = "full" },
+				{ "monitor_color_border", "color", requires_inverse = "quality_color" },
+				{ "color_all_rows", requires_inverse = "quality_color" },
 				{ "gradients", must_reload_ui = true },
 			}, name = L.Frame.colors },
 		})
@@ -780,11 +797,12 @@ function addon:Init()
 		end
 		-- Generate new panel
 		AceConfigRegistry:RegisterOptionsTable("XLoot", self.config)
-		local panel = AceConfigDialog:AddToBlizOptions("XLoot")
+		local panel, category_id = AceConfigDialog:AddToBlizOptions("XLoot")
 		XLoot.option_panel = panel
+		-- On 12.0 Settings.OpenToCategory needs the numeric category ID, not the addon name
+		XLoot.option_category_id = category_id
 		panel.default = PanelDefault
-		-- panel.okay = PanelOkay
-		-- panel.cancel = PanelCancel
+		panel.OnDefault = PanelDefault -- 10.0+ Settings canvas calls OnDefault, not default
 
 		local _OnShow = panel:GetScript("OnShow")
 		local _OnHide = panel:GetScript("OnHide")
@@ -805,6 +823,7 @@ function addon:Init()
 		AceConfigRegistry:RegisterOptionsTable("XLootProfile", LibStub("AceDBOptions-3.0"):GetOptionsTable(XLoot.db))
 		XLoot.profile_panel = AceConfigDialog:AddToBlizOptions("XLootProfile", L.profile, "XLoot")
 		XLoot.profile_panel.default = PanelDefault
+		XLoot.profile_panel.OnDefault = PanelDefault
 		-- Force list to expand
 		if not Settings then
 			InterfaceAddOnsList_Update()
@@ -816,7 +835,7 @@ function addon:OpenPanel(module)
 	addon:Init()
 	-- Open panel
 	if Settings then
-		Settings.OpenToCategory("XLoot")
+		Settings.OpenToCategory(XLoot.option_category_id or "XLoot")
 	else
 		InterfaceOptionsFrame_OpenToCategory(XLoot.option_panel)
 	end

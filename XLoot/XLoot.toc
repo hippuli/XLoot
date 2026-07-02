@@ -1,16 +1,14 @@
-## Interface: 120000, 120001
-## Interface-Classic: 11403
-## Interface-BCC: 20502
-## Interface-WoTLK: 30401
+## Interface: 11508, 20505, 50504, 120001, 120005, 120007
 ## Title: XLoot
 ## Notes: Core module for Loot and Looting-related UI improvements. Thank you to J.N., A.J.C., R.L., E.V., B.Y., J.C., R.P., R.R., and K.K. for your donations over the years.
-## Version: 12-1
+## Version: 12.7.0
 ## Author: Xuerian
 ## X-Category: Inventory
 ## X-Name: XLoot
+## X-Curse-Project-ID: 14906
 
 ## SavedVariables: XLootADB
-## OptionalDeps: Ace3, LibStub, ButtonFacade, Masque, Pawn
+## OptionalDeps: Ace3, LibStub, Masque, Pawn
 
 #@no-lib-strip@
 Libs\Embeds.xml

@@ -3,7 +3,6 @@ local XLoot = select(2, ...)
 local lib = {}
 XLoot.Stack = lib
 local L = XLoot.L
-local print = print
 
 ---@class XLootAnchorPrototype: Button
 local AnchorPrototype = XLoot.NewPrototype()
@@ -44,11 +43,19 @@ do
 		self:_Hide()
 	end
 
+	-- Route native SetShown through the overrides so data.visible persists
+	function AnchorPrototype:SetShown(show)
+		if show then
+			self:Show()
+		else
+			self:Hide()
+		end
+	end
+
 	function AnchorPrototype:Position(x, y)
 		self:ClearAllPoints()
 		self:SetPoint('TOPLEFT', UIParent, 'BOTTOMLEFT', x or self.data.x, y or self.data.y)
 		self:SetHeight(20)
-		-- self:SetWidth(self.label:GetStringWidth() + 100)
 		self:SetWidth(175)
 	end
 
@@ -220,4 +227,3 @@ do
 		return anchor
 	end
 end
-

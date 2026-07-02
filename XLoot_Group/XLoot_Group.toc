@@ -1,10 +1,7 @@
-## Interface: 100005
-## Interface-Classic: 11403
-## Interface-BCC: 20502
-## Interface-WoTLK: 30400
+## Interface: 11508, 20505, 50504, 120001, 120005, 120007
 ## Title: XLoot Group
 ## Notes: Customizable and skinnable loot roll, alert, and reroll frames
-## Version: 12-1
+## Version: 12.7.0
 ## Author: Xuerian
 ## X-Category: Inventory
 

@@ -35,6 +35,7 @@ local locales = {
 		skin_smooth = "XLoot: Smooth",
 		anchor_hide = "hide",
 		anchor_hide_desc = "Lock this module in position\nThis will hide the anchor,\nbut it can be shown again from the options",
+		discord_popup = "Join the XLoot community for help, feedback, and updates.\n\nCopy the invite below (it's pre-selected — just press Ctrl+C):",
 	},
 	-- Possibly localized
 	ptBR = {},
@@ -49,64 +50,55 @@ local locales = {
 }
 
 -- Automatically inserted translations
-locales.ptBR["Core"] = {
-}
+-- Core
 
-locales.frFR["Core"] = {
-}
+-- Core
 
-locales.deDE["Core"] = {
-	["anchor_hide"] = "verstecken",
-	["skin_legacy"] = "XLoot: Legacy",
-	["skin_smooth"] = "XLoot: Smooth",
-	["skin_svelte"] = "XLoot: Svelte",
-}
+-- Core
+locales.deDE["anchor_hide"] = "verstecken"
+locales.deDE["skin_legacy"] = "XLoot: Legacy"
+locales.deDE["skin_smooth"] = "XLoot: Smooth"
+locales.deDE["skin_svelte"] = "XLoot: Svelte"
 
-locales.koKR["Core"] = {
-	["anchor_hide"] = "감춤",
-	["anchor_hide_desc"] = [=[이 모듈을 제 위치에 잠급니다.
+-- Core
+locales.koKR["anchor_hide"] = "감춤"
+locales.koKR["anchor_hide_desc"] = [=[이 모듈을 제 위치에 잠급니다.
 이는 표시기를 숨기지만,
-옵션에서 다시 표시할 수 있습니다.]=],
-	["skin_legacy"] = "XLoot: Legacy",
-	["skin_smooth"] = "XLoot: Smooth",
-	["skin_svelte"] = "XLoot: Svelte",
-}
+옵션에서 다시 표시할 수 있습니다.]=]
+locales.koKR["skin_legacy"] = "XLoot: Legacy"
+locales.koKR["skin_smooth"] = "XLoot: Smooth"
+locales.koKR["skin_svelte"] = "XLoot: Svelte"
 
-locales.esMX["Core"] = {
-}
+-- Core
 
-locales.ruRU["Core"] = {
-	["anchor_hide"] = "скрыть ",
-	["anchor_hide_desc"] = [=[Заблокируйте положение этого модуля
+-- Core
+locales.ruRU["anchor_hide"] = "скрыть "
+locales.ruRU["anchor_hide_desc"] = [=[Заблокируйте положение этого модуля
 Это позволит скрыть якорь,
-но он может быть показан еще раз в настройках]=],
-	["skin_legacy"] = "XLoot: Legacy",
-	["skin_smooth"] = "XLoot: Smooth",
-	["skin_svelte"] = "XLoot: Svelte",
-}
+но он может быть показан еще раз в настройках]=]
+locales.ruRU["skin_legacy"] = "XLoot: Legacy"
+locales.ruRU["skin_smooth"] = "XLoot: Smooth"
+locales.ruRU["skin_svelte"] = "XLoot: Svelte"
 
-locales.zhCN["Core"] = {
-	["anchor_hide"] = "隐藏",
-	["anchor_hide_desc"] = [=[在此位置锁定此模块
+-- Core
+locales.zhCN["anchor_hide"] = "隐藏"
+locales.zhCN["anchor_hide_desc"] = [=[在此位置锁定此模块
 这将隐藏锚点
-但可通过选项重新显示]=],
-	["skin_legacy"] = "XLoot: Legacy",
-	["skin_smooth"] = "XLoot: Smooth",
-	["skin_svelte"] = "XLoot: Svelte",
-}
+但可通过选项重新显示]=]
+locales.zhCN["skin_legacy"] = "XLoot: Legacy"
+locales.zhCN["skin_smooth"] = "XLoot: Smooth"
+locales.zhCN["skin_svelte"] = "XLoot: Svelte"
 
-locales.esES["Core"] = {
-}
+-- Core
 
-locales.zhTW["Core"] = {
-	["anchor_hide"] = "隱藏",
-	["anchor_hide_desc"] = [=[鎖定此模組在此位置上
+-- Core
+locales.zhTW["anchor_hide"] = "隱藏"
+locales.zhTW["anchor_hide_desc"] = [=[鎖定此模組在此位置上
 這會隱藏此錨點,
-但它可以藉由選項再次顯示]=],
-	["skin_legacy"] = "XLoot: 傳統",
-	["skin_smooth"] = "XLoot: 滑順",
-	["skin_svelte"] = "XLoot: 苗條",
-}
+但它可以藉由選項再次顯示]=]
+locales.zhTW["skin_legacy"] = "XLoot: 傳統"
+locales.zhTW["skin_smooth"] = "XLoot: 滑順"
+locales.zhTW["skin_svelte"] = "XLoot: 苗條"
 
 
 

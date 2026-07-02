@@ -45,7 +45,7 @@ XLootFrame.addon = addon
 local XLootFrame = XLootFrame
 
 -- Grab locals
-local mouse_focus, opt
+local opt
 
 -- Because forking the API is a great idea
 local LOOT_SLOT_NONE = LOOT_SLOT_NONE or Enum.LootSlotType.None
@@ -107,6 +107,7 @@ local defaults = {
 		loot_texts_info = true,
 		loot_texts_bind  = true,
 		loot_texts_lock = true,
+		loot_texts_sell = false,
 
 		loot_buttons_auto = true,
 
@@ -146,11 +147,20 @@ local defaults = {
 			currency = 'never',
 			tradegoods = 'never',
 			quest = 'never',
+			gear = 'never',
+			value = 'never',
 			list = 'solo',
 			all = 'never',
 		},
 
 		autoloot_item_list = '',
+
+		autoloot_gear_quality = 0, -- Quality 0 - 6, Poor - Artifact
+		autoloot_gear_minlevel = 0,
+		autoloot_value_minprice = 0, -- Gold; sellPrice is copper (x10000)
+
+		speedy_autoloot = false,
+		speedy_autoloot_respect_filters = false,
 
 		frame_draggable = true,
 
@@ -186,6 +196,7 @@ end
 
 function addon:OnEnable()
 	-- Register events
+	XLootFrame:RegisterEvent("LOOT_READY")
 	XLootFrame:RegisterEvent("LOOT_OPENED")
 	XLootFrame:RegisterEvent("LOOT_CLOSED")
 	XLootFrame:RegisterEvent("LOOT_SLOT_CLEARED")
@@ -200,15 +211,7 @@ function addon:OnEnable()
 	-- Register for escape close
 	table.insert(UISpecialFrames, "XLootFrame")
 
-	-- Reattach master looter frame
-	MasterLooterFrame:SetScript('OnShow',
-	function(self)
-		if XLootFrame:IsVisible() then
-			MasterLooterFrame:SetFrameLevel(XLootFrame:GetFrameLevel()+2)
-			MasterLooterFrame:ClearAllPoints()
-			MasterLooterFrame:SetPoint("BOTTOM",XLootFrame,"TOP")
-		end
-	end)
+	-- No MasterLooterFrame reattach: retail master loot is back (12.0.5, CN-realm-only) on the new ScrollBox/MenuUtil flow, not our old hook.
 end
 
 local preview_loot = {
@@ -354,7 +357,7 @@ do
 			channel = 'PARTY'
 		end
 		for k, v in pairs(output) do
-			v  = string.gsub(v, "\n", " ", 1, true) -- DIE NEWLINES, DIE A HORRIBLE DEATH
+			v = v:gsub("\n", " ")
 			SendChatMessage(v, channel)
 			if opt.linkall_channel_secondary ~= 'NONE' then
 				SendChatMessage(v, opt.linkall_channel_secondary)
@@ -459,6 +462,7 @@ do
 	---@field text_quantity FontString
 	---@field text_bind FontString
 	---@field text_locked FontString
+	---@field text_sell FontString
 	---@field text_button_auto FontString
 	---@field button_auto Button
 	---@field frame_item Frame
@@ -488,11 +492,6 @@ do
 	function RowPrototype:SetBorderColor(r, g, b, a)
 		self:_SetBorderColor(r, g, b, a or 1)
 		self.frame_item:SetBorderColor(r, g, b, a or 1)
-	end
-
-	function RowPrototype:SetHighlightColor(r, g, b, a)
-		self:SetHighlightColor(r, g, b, a)
-		self.frame_item:SetHighlightColor(r, g, b, a)
 	end
 
 	-- Frame events
@@ -547,11 +546,12 @@ do
 			if IsModifiedClick() then
 				HandleModifiedItemClick(GetLootSlotLink(self.slot))
 			elseif LootButton_OnClick then
+				-- Classic master loot: feeding our row to Blizzard's handler sets LootFrame.selected* so XLoot_Master's MasterLooterFrame_Show hook can award the slot.
 				LootButton_OnClick(self, button)
 			else
 				StaticPopup_Hide("CONFIRM_LOOT_DISTRIBUTION")
 				LootSlot(self.slot)
-				EventRegistry:TriggerEvent("LootFrame.ItemLooted")
+				if EventRegistry then EventRegistry:TriggerEvent("LootFrame.ItemLooted") end
 			end
 		end
 	end
@@ -609,6 +609,7 @@ do
 		-- Text
 		self.text_name:SetFont(opt.font, opt.font_size_loot)
 		self.text_info:SetFont(opt.font, opt.font_size_info)
+		self.text_sell:SetFont(opt.font, opt.font_size_info, opt.font_flag)
 		self.text_quantity:SetFont(opt.font, opt.font_size_quantity, opt.font_flag)
 		self.text_bind:SetFont(opt.font, 8, opt.font_flag)
 		self.text_locked:SetFont(opt.font, 9, opt.font_flag)
@@ -699,6 +700,11 @@ do
 		self.text_info:SetText(text_info)
 		self.text_bind:SetText(text_bind)
 		self.text_quantity:SetText(slotData.quantity > 1 and slotData.quantity or nil)
+		if opt.loot_texts_sell and slotData.slotType == LOOT_SLOT_ITEM and slotData.sellPrice and slotData.sellPrice > 0 then
+			self.text_sell:SetText(XLoot.CopperToString(slotData.sellPrice * slotData.quantity))
+		else
+			self.text_sell:SetText()
+		end
 		if slotData.questID or slotData.isQuestItem then
 			self.text_info:SetTextColor(1, .8, .1)
 		else
@@ -753,7 +759,12 @@ do
 
 		self:Show()
 
-		return max(self.text_info:GetStringWidth() + 2, name_width)
+		local info_width = self.text_info:GetStringWidth() + 2
+		local sell_width = self.text_sell:GetStringWidth()
+		if sell_width > 0 then
+			info_width = info_width + sell_width + 8
+		end
+		return max(info_width, name_width)
 	end
 
 	-- Factory
@@ -787,12 +798,14 @@ do
 		local quantity = item:CreateFontString()
 		local locked = item:CreateFontString()
 		local auto = button_auto:CreateFontString()
+		local sell = row:CreateFontString()
 		row.text_name = name
 		row.text_info = info
 		row.text_bind = bind
 		row.text_locked = locked
 		row.text_quantity = quantity
 		row.text_button_auto = auto
+		row.text_sell = sell
 
 		-- Setup fontstrings
 		smalltext(name)
@@ -801,9 +814,12 @@ do
 		smalltext(locked)
 		smalltext(quantity)
 		smalltext(auto)
+		smalltext(sell)
 		name:SetPoint('RIGHT', row, 'RIGHT', -6, 0)
 		info:SetPoint('TOPLEFT', name, 'BOTTOMLEFT', 8, 0)
 		info:SetPoint('RIGHT', row, 'RIGHT', -4, 0)
+		sell:SetPoint('BOTTOMRIGHT', row, 'BOTTOMRIGHT', -6, 3)
+		sell:SetJustifyH('RIGHT')
 		textpoints(name, item, row, 2)
 		textpoints(info, item, row, 8)
 		info:SetPoint('TOP', name, 'BOTTOM')
@@ -1159,11 +1175,98 @@ local function BoPRefresh()
 	XLootFrame:Update(false, true)
 end
 
+local tremove = table.remove
+local MASTER_LOOT = Enum and Enum.LootMethod and Enum.LootMethod.Masterlooter
+local speedy = { queue = {}, ticker = nil, leftover = nil, lastcount = nil, vacuum = false }
+
+-- Enum.LootMethod is absent on some flavors, so fall through to the string API before trusting the enum.
+local function SpeedyMasterLoot()
+	if MASTER_LOOT and C_PartyInfo and C_PartyInfo.GetLootMethod then
+		return C_PartyInfo.GetLootMethod() == MASTER_LOOT
+	end
+	if GetLootMethod and GetLootMethod() == 'master' then
+		return true
+	end
+	return GetMasterLootCandidate and GetMasterLootCandidate(1, 1) ~= nil or false
+end
+
+-- Never vacuum under master loot (would grab assignable drops) or while the auto-loot modifier is held.
+local function SpeedyAllowed()
+	return not IsModifiedClick('AUTOLOOTTOGGLE') and not SpeedyMasterLoot()
+end
+
+local function SpeedyStop()
+	if speedy.ticker then
+		speedy.ticker:Cancel()
+		speedy.ticker = nil
+	end
+	if speedy.leftover then
+		speedy.leftover:Cancel()
+		speedy.leftover = nil
+	end
+end
+
+-- Bags filling mid-vacuum strand loot in the suppressed window; reveal whatever is left once draining stops.
+local function SpeedyLeftovers()
+	speedy.leftover = nil
+	for slot = 1, GetNumLootItems() do
+		if LootSlotHasItem(slot) then
+			BoPRefresh()
+			return
+		end
+	end
+end
+
+local function SpeedyDrain()
+	local slot = tremove(speedy.queue)
+	if slot and LootSlotHasItem(slot) then
+		LootSlot(slot)
+	end
+	if #speedy.queue == 0 then
+		SpeedyStop()
+		if speedy.vacuum and C_Timer and C_Timer.NewTimer then
+			speedy.leftover = C_Timer.NewTimer(0.3, SpeedyLeftovers)
+		end
+	end
+end
+
+local function SpeedyStart()
+	if speedy.ticker or #speedy.queue == 0 then return end
+	if C_Timer and C_Timer.NewTicker then
+		-- One slot per tick, never a tight loop: a rapid-loot burst trips the server disconnect on big piles.
+		speedy.ticker = C_Timer.NewTicker(0.03, SpeedyDrain)
+	else
+		while #speedy.queue > 0 do
+			SpeedyDrain()
+		end
+	end
+end
+
+-- lastcount dedups the shared LOOT_READY/LOOT_OPENED pass; a real count change rebuilds the queue.
+local function SpeedyVacuum()
+	local n = GetNumLootItems()
+	if n == 0 or speedy.lastcount == n then return end
+	speedy.lastcount = n
+	speedy.vacuum = true
+	SpeedyStop()
+	wipe(speedy.queue)
+	for slot = 1, n do
+		speedy.queue[slot] = slot
+	end
+	SpeedyStart()
+end
+
 local _bag_slots, GetItemBindType = {}, XLoot.GetItemBindType
 function XLootFrame:Update(no_snap, is_refresh)
 	local numloot = GetNumLootItems()
 	if numloot == 0 then return nil end
 	local max = math.max
+	local speedy_paced = not is_refresh and opt.speedy_autoloot
+		and opt.speedy_autoloot_respect_filters and SpeedyAllowed()
+	if speedy_paced then
+		speedy.vacuum = false
+		wipe(speedy.queue)
+	end
 
 	-- Construct frame
 	if not self.built then
@@ -1202,11 +1305,17 @@ function XLootFrame:Update(no_snap, is_refresh)
 			local autoloot = false
 			local slotType, slotData = GetLootSlotType(slot)
 			if slotType == LOOT_SLOT_ITEM then
-				slotData = GetItemInfoTable(GetLootSlotLink(slot))
+				local link = GetLootSlotLink(slot)
+				slotData = GetItemInfoTable(link)
+				-- Item not in client cache yet: render from loot-slot data, refresh shortly
+				if not slotData then
+					slotData = { name = name, icon = icon, quality = quality, link = link, stackCount = 1, bindType = 0 }
+					need_refresh = true
+				end
 				slotData.slotType = slotType
 				slotData.quantity = quantity
 				slotData.locked = locked
-				slotData.questItem = isQuestItem
+				slotData.isQuestItem = isQuestItem
 				slotData.questID = questID
 				slotData.startsQuest = startsQuest
 			else
@@ -1237,6 +1346,13 @@ function XLootFrame:Update(no_snap, is_refresh)
 					auto.all
 					or (auto.list and auto_items[name])
 					or (auto.tradegoods and slotData.isCraftingReagent)
+					or (auto.gear
+						and slotData.equipLoc and slotData.equipLoc ~= ''
+						and (slotData.quality or 0) >= opt.autoloot_gear_quality
+						and (C_Item.GetDetailedItemLevelInfo(slotData.link) or slotData.level or 0) >= opt.autoloot_gear_minlevel)
+					or (auto.value
+						and slotData.sellPrice and slotData.sellPrice > 0
+						and slotData.sellPrice * quantity >= opt.autoloot_value_minprice * 10000)
 				then
 					-- Cache available space
 					--  Specific bag types make this a bit more annoying
@@ -1269,8 +1385,12 @@ function XLootFrame:Update(no_snap, is_refresh)
 				end
 
 				if autoloot then
-					need_refresh = true
-					LootSlot(slot)
+					if speedy_paced then
+						speedy.queue[#speedy.queue + 1] = slot
+					else
+						need_refresh = true
+						LootSlot(slot)
+					end
 				end
 			end
 
@@ -1300,6 +1420,10 @@ function XLootFrame:Update(no_snap, is_refresh)
 		end
 	end
 
+	if speedy_paced then
+		SpeedyStart()
+	end
+
 	if not is_refresh and need_refresh then
 		C_Timer.After(0.8, BoPRefresh)
 	end
@@ -1320,6 +1444,10 @@ function XLootFrame:Update(no_snap, is_refresh)
 end
 
 function addon:LOOT_CLOSED()
+	SpeedyStop()
+	wipe(speedy.queue)
+	speedy.lastcount = nil
+	speedy.vacuum = false
 	if type(XLootFrame.rows) == 'table' then
 		for i, row in pairs(XLootFrame.rows) do
 			clear(row)
@@ -1333,7 +1461,23 @@ function addon:LOOT_CLOSED()
 	end
 end
 
+-- LOOT_READY fires before LOOT_OPENED; vacuum here so looting starts a frame earlier.
+function addon:LOOT_READY()
+	if opt.speedy_autoloot and not opt.speedy_autoloot_respect_filters
+		and SpeedyAllowed() and GetNumLootItems() > 0 then
+		SpeedyVacuum()
+	end
+end
+
 function addon:LOOT_OPENED()
+	if opt.speedy_autoloot and not opt.speedy_autoloot_respect_filters
+		and SpeedyAllowed() and GetNumLootItems() > 0 then
+		if not XLootFrame:IsShown() and IsFishingLoot() then
+			PlaySound(SOUNDKIT.FISHING_REEL_IN)
+		end
+		SpeedyVacuum()
+		return
+	end
 	if GetNumLootItems() > 0 then
 		if not XLootFrame:IsShown() and IsFishingLoot() then
 			PlaySound(SOUNDKIT.FISHING_REEL_IN)
@@ -1370,7 +1514,7 @@ end
 
 -- Show compare tooltip when shift pressed
 -- Without using OnUpdate for all frames
-function addon:MODIFIER_STATE_CHANGED(self, modifier, state)
+function addon:MODIFIER_STATE_CHANGED()
 	if (GetNumLootItems() ~= 0) and mouse_focus and MouseIsOver(mouse_focus) then
 		mouse_focus:ShowTooltip()
 	end
