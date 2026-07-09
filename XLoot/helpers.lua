@@ -4,6 +4,8 @@ local buffer, print = {}, print
 
 local table_insert, table_concat, string_format = table.insert, table.concat, string.format
 
+local issecret = issecretvalue -- 12.0 secret values; nil pre-12.0
+
 local coin_table = {
 	{ GOLD_AMOUNT, 0, "ffd700" },
 	{ SILVER_AMOUNT, 0, "c7c7cf" },
@@ -28,9 +30,10 @@ function XLoot.CopperToString(copper)
 	return table_concat(buffer, ", ")
 end
 
-XLootTooltip = CreateFrame('GameTooltip', 'XLootTooltip', UIParent, 'GameTooltipTemplate')
+-- Scanning tooltip must live outside the UIParent tree, or the tooltip refresh cycle perpetually re-processes dynamic content (weapon imbues, temp buffs, tradeable timers).
+XLootTooltip = CreateFrame('GameTooltip', 'XLootTooltip', nil, 'GameTooltipTemplate')
 local tooltip = XLootTooltip
-tooltip:SetOwner(UIParent, "ANCHOR_NONE")
+tooltip:SetOwner(WorldFrame, "ANCHOR_NONE")
 
 local bind_types = {
 	[ITEM_BIND_ON_PICKUP] = 'pickup',
@@ -57,6 +60,7 @@ function XLoot.GetItemBindType(link)
 end
 
 function XLoot.CanEquipItem(link)
+	if issecret and issecret(link) then return false end
 	if not C_Item.IsEquippableItem(link) then
 		return false
 	end
@@ -81,6 +85,116 @@ function XLoot.IsItemUpgrade(link)
 	end
 	return false
 end
+
+-- No single "do I own this appearance" API (no help from blizzard here lol): PlayerHasTransmog* is per-source, so OR the collected state across every source.
+local C_TC = _G.C_TransmogCollection
+local TC_GetItemInfo = C_TC and C_TC.GetItemInfo
+local TC_GetAllSources = C_TC and C_TC.GetAllAppearanceSources
+local TC_PlayerHasSource = C_TC and C_TC.PlayerHasTransmogItemModifiedAppearance
+local GetItemInfoInstant = (C_Item and C_Item.GetItemInfoInstant) or GetItemInfoInstant
+if TC_GetItemInfo and TC_GetAllSources and TC_PlayerHasSource and GetItemInfoInstant then
+	local CLASS_WEAPON, CLASS_ARMOR = 2, 4
+	local CACHE_CAP = 256
+	local appearance_cache, cache_count = {}, 0
+	local invalidator
+	local function ensure_invalidator()
+		if invalidator then return end
+		invalidator = CreateFrame('Frame')
+		invalidator:RegisterEvent('TRANSMOG_COLLECTION_SOURCE_ADDED')
+		invalidator:RegisterEvent('TRANSMOG_COLLECTION_SOURCE_REMOVED')
+		invalidator:SetScript('OnEvent', function() wipe(appearance_cache); cache_count = 0 end)
+	end
+	function XLoot.IsNewAppearance(link)
+		if not link then return false end
+		local classID = select(6, GetItemInfoInstant(link))
+		if classID ~= CLASS_WEAPON and classID ~= CLASS_ARMOR then return false end
+		local appearanceID, sourceID = TC_GetItemInfo(link)
+		if not appearanceID or not sourceID or sourceID == 0 then return false end
+		-- false is a real cached verdict, so test presence with ~= nil
+		local cached = appearance_cache[sourceID]
+		if cached ~= nil then return cached end
+		local sources = TC_GetAllSources(appearanceID)
+		if not sources then return false end -- transient nil: bail without caching a guess
+		ensure_invalidator()
+		local isNew = true
+		for i = 1, #sources do
+			if TC_PlayerHasSource(sources[i]) then
+				isNew = false
+				break
+			end
+		end
+		if cache_count >= CACHE_CAP then wipe(appearance_cache); cache_count = 0 end
+		appearance_cache[sourceID] = isNew
+		cache_count = cache_count + 1
+		return isNew
+	end
+else
+	function XLoot.IsNewAppearance() return false end
+end
+
+-- Equip location -> the inventory slot(s) it competes with; multi-slot types (rings/trinkets/1H weapons) win if they beat any one.
+local UPGRADE_SLOTS = {
+	INVTYPE_HEAD = { INVSLOT_HEAD },
+	INVTYPE_NECK = { INVSLOT_NECK },
+	INVTYPE_SHOULDER = { INVSLOT_SHOULDER },
+	INVTYPE_CHEST = { INVSLOT_CHEST },
+	INVTYPE_ROBE = { INVSLOT_CHEST },
+	INVTYPE_WAIST = { INVSLOT_WAIST },
+	INVTYPE_LEGS = { INVSLOT_LEGS },
+	INVTYPE_FEET = { INVSLOT_FEET },
+	INVTYPE_WRIST = { INVSLOT_WRIST },
+	INVTYPE_HAND = { INVSLOT_HAND },
+	INVTYPE_FINGER = { INVSLOT_FINGER1, INVSLOT_FINGER2 },
+	INVTYPE_TRINKET = { INVSLOT_TRINKET1, INVSLOT_TRINKET2 },
+	INVTYPE_CLOAK = { INVSLOT_BACK },
+	INVTYPE_WEAPON = { INVSLOT_MAINHAND, INVSLOT_OFFHAND },
+	INVTYPE_2HWEAPON = { INVSLOT_MAINHAND },
+	INVTYPE_WEAPONMAINHAND = { INVSLOT_MAINHAND },
+	INVTYPE_WEAPONOFFHAND = { INVSLOT_OFFHAND },
+	INVTYPE_HOLDABLE = { INVSLOT_OFFHAND },
+	INVTYPE_SHIELD = { INVSLOT_OFFHAND },
+	INVTYPE_RANGED = { INVSLOT_MAINHAND },
+	INVTYPE_RANGEDRIGHT = { INVSLOT_MAINHAND },
+}
+local GetDetailedItemLevelInfo = (C_Item and C_Item.GetDetailedItemLevelInfo) or GetDetailedItemLevelInfo
+local GetInventoryItemLink = GetInventoryItemLink
+local RequestLoadItemDataByID = C_Item and C_Item.RequestLoadItemDataByID
+if GetDetailedItemLevelInfo and GetItemInfoInstant and GetInventoryItemLink then
+	local CLASS_WEAPON, CLASS_ARMOR = 2, 4
+	function XLoot.IsIlvlUpgrade(link)
+		if not link then return false end
+		local itemID, _, _, equipLoc, _, classID, subclassID = GetItemInfoInstant(link)
+		if classID ~= CLASS_WEAPON and classID ~= CLASS_ARMOR then return false end
+		local slots = equipLoc and UPGRADE_SLOTS[equipLoc]
+		if not slots then return false end
+		local lootedIlvl = GetDetailedItemLevelInfo(link)
+		if not lootedIlvl or lootedIlvl == 0 then
+			-- ilvl not cached yet; warm it and skip this pass rather than risk a wrong tag
+			if itemID and RequestLoadItemDataByID then RequestLoadItemDataByID(itemID) end
+			return false
+		end
+		-- Only when an equipped slot holds the SAME weapon/armor subtype at lower ilvl: proves the player can use it, so no false tag on unusable gear.
+		for i = 1, #slots do
+			local equipped = GetInventoryItemLink('player', slots[i])
+			if equipped and select(7, GetItemInfoInstant(equipped)) == subclassID then
+				local equippedIlvl = GetDetailedItemLevelInfo(equipped)
+				if equippedIlvl and lootedIlvl > equippedIlvl then return true end
+			end
+		end
+		return false
+	end
+else
+	function XLoot.IsIlvlUpgrade() return false end
+end
+local URGENCY_START, URGENCY_FULL = 0.3, 0.1
+local URGENT_R, URGENT_G, URGENT_B = 1, 0.15, 0.15
+function XLoot.TimeFractionColor(fraction, r, g, b)
+	if fraction >= URGENCY_START then return r, g, b end
+	local t = fraction <= URGENCY_FULL and 1
+		or (URGENCY_START - fraction) / (URGENCY_START - URGENCY_FULL)
+	return r + (URGENT_R - r) * t, g + (URGENT_G - g) * t, b + (URGENT_B - b) * t
+end
+
 -- Tack role icon on to player name and return class colors
 local white = { r = 1, g = 1, b = 1 }
 local dimensions = {
@@ -108,6 +222,52 @@ function XLoot.FancyPlayerName(name, class, opt)
 		name = string_format('\124TInterface\\LFGFRAME\\LFGROLE:12:12:-1:0:64:16:%s:0:16\124t%s', dimensions[role], name)
 	end
 	return name, c.r, c.g, c.b
+end
+
+-- Loot method: the string GetLootMethod() global is gone on modern Classic/retail and Enum.LootMethod is absent on some older flavors, so probe the C_PartyInfo enum first and fall back to the global. Both return method, masterlooterPartyID, masterlooterRaidID.
+local MASTER_LOOT = Enum and Enum.LootMethod and Enum.LootMethod.Masterlooter
+local C_GetLootMethod = C_PartyInfo and C_PartyInfo.GetLootMethod
+local function MasterLootInfo()
+	if MASTER_LOOT and C_GetLootMethod then
+		local method, party_id, raid_id = C_GetLootMethod()
+		return method == MASTER_LOOT, party_id, raid_id
+	end
+	if GetLootMethod then
+		local method, party_id, raid_id = GetLootMethod()
+		return method == 'master', party_id, raid_id
+	end
+	-- Last resort while a loot window is open: a candidate list only exists under master loot.
+	return GetMasterLootCandidate and GetMasterLootCandidate(1, 1) ~= nil or false
+end
+
+function XLoot.GroupUsesMasterLoot()
+	return (MasterLootInfo()) and true or false
+end
+
+function XLoot.IsMasterLooter()
+	local isMaster, party_id, raid_id = MasterLootInfo()
+	if not isMaster then return false end
+	if raid_id then
+		return UnitIsUnit('player', 'raid'..raid_id)
+	elseif party_id then
+		return party_id == 0
+	end
+	return false
+end
+
+XLoot.SendChatMessage = (C_ChatInfo and C_ChatInfo.SendChatMessage) or SendChatMessage
+
+-- Numeric segment-by-segment compare, since a string compare sorts "12.10.0" below "12.9.0". Returns 1, -1, or 0.
+function XLoot.CompareVersions(a, b)
+	local ai, bi = tostring(a or ""):gmatch("%d+"), tostring(b or ""):gmatch("%d+")
+	while true do
+		local a_part, b_part = ai(), bi()
+		if not a_part and not b_part then return 0 end
+		local an, bn = tonumber(a_part) or 0, tonumber(b_part) or 0
+		if an ~= bn then
+			return an > bn and 1 or -1
+		end
+	end
 end
 
 
@@ -151,6 +311,7 @@ end
 -- Match string against a pattern, caching the inverted pattern
 local invert_cache = {}
 function XLoot.Deformat(str, pattern)
+	if issecret and issecret(str) then return end
 	local func = invert_cache[pattern]
 	if not func then
 		local inverted, arglist = invert(pattern)

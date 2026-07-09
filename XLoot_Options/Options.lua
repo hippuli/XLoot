@@ -3,6 +3,13 @@ Options are preferrably defined as "BetterOptions" tables, which functionally re
 
 The point of this abstraction layer is that I (Xuerian) wanted to use AceDB/AceConfig to present a more standard configuration dialog to users. I am, however, not satisfied with the conventions and limitations of it, so this is a attempt to provide both a more concise format (BetterOptions), and a more featureful intermediate options format (Finalize(...)) to support it.
 
+--Follow up to Xuerian's comment above:
+--(wheelbarrel00, current maintainer) I kept all of this. Ace is still the de facto
+--standard, so users get a config dialog they already know how to use, and the
+--BetterOptions/Finalize layer hides almost all of AceConfig's boilerplate and quirks.
+--It has also aged well: when 10.0 replaced the old interface panel with the Settings
+--canvas, this abstraction absorbed most of the churn and the module option tables
+--below never had to change.
 
 Methods:
 Finalize(module_data, option_table)
@@ -402,6 +409,11 @@ function addon:OnEnable() -- Construct addon option tables here
 	end
 
 	local skins = {}
+	local whatsnew_modes = {
+		{ "popup", L.whatsnew_mode_popup },
+		{ "chat", L.whatsnew_mode_chat },
+		{ "none", L.whatsnew_mode_none },
+	}
 	local options = Finalize({ name = "Core", addon =  XLoot, OnChanged = OnCoreChanged }, BetterOptions.Compile({
 		{ "details", "description" },
 		{ "skin", "select", values = function()
@@ -412,6 +424,9 @@ function addon:OnEnable() -- Construct addon option tables here
 			return skins
 		end},
 		{ "skin_anchors", "toggle" },
+		{ "tooltip_sell", "toggle", hidden = WOW_PROJECT_ID == WOW_PROJECT_MAINLINE },
+		{ "whatsnew_mode", whatsnew_modes },
+		{ "whatsnew_show", "execute", func = function() XLoot:ShowWhatsNew() end },
 		{ "reset_defaults", "execute", confirm = true, func = function() addon:ResetProfile() end },
 		{ "discord", "execute", func = function() XLoot:ShowDiscord() end },
 		-- { "module_header", "header" },
@@ -519,6 +534,8 @@ function addon:OnEnable() -- Construct addon option tables here
 				{ "loot_collapse" },
 				{ "loot_texts_lock", width = "double" },
 				{ "loot_texts_sell" },
+				{ "loot_texts_newlook" },
+				{ "loot_texts_upgrade" },
 				{ "loot_buttons_auto" },
 				{ "loot_alpha", "alpha" },
 				{ "loot_icon_size", "range", 16, 64, 1 },
@@ -531,6 +548,7 @@ function addon:OnEnable() -- Construct addon option tables here
 			}},
 			{ "link_button", "group", {
 				{ "linkall_show", when_group },
+				{ "linkall_auto", when_group },
 				{ "linkall_threshold", item_qualities },
 				{ "linkall_channel", {
 					{ "SAY", CHAT_MSG_SAY },
@@ -565,6 +583,8 @@ function addon:OnEnable() -- Construct addon option tables here
 				{ "autoloot_gear_minlevel", "range", 0, 1000, 5 },
 				{ "autoloot_value", when_group, "autoloots", "value" },
 				{ "autoloot_value_minprice", "range", 0, 100000, 1, 0, 1000, 50 },
+				{ "autoloot_quality", when_group, "autoloots", "quality" },
+				{ "autoloot_quality_min", item_qualities },
 				{ "autoloot_all", when_group, "autoloots", "all" },
 				{ "autolooting_list", "description" },
 				{ "autoloot_list", when_group, "autoloots", "list" },
@@ -573,6 +593,7 @@ function addon:OnEnable() -- Construct addon option tables here
 			}},
 			{ "font", "group", {
 				{ "font", fonts },
+				{ "font_flag_loot", font_flag },
 				{ "font_flag", font_flag },
 				{ "font_sizes", "header" },
 				{ "font_size_loot", "range", 4, 26, 1 },
@@ -599,6 +620,9 @@ function addon:OnEnable() -- Construct addon option tables here
 	-- XLoot Group
 	if XLoot:GetModule("Group", true) then
 		addon:RegisterOptions({ name = "Group", addon =  XLootGroup }, {
+			{ "testing", "group", {
+				{ "test_settings", "execute", func = XLootGroup.TestSettings }
+			}},
 			{ "anchors", "group", {
 				{ "roll_anchor_visible", "toggle", "roll_anchor", "visible", set = set_anchor },
 			}},
@@ -620,6 +644,10 @@ function addon:OnEnable() -- Construct addon option tables here
 				{ "role_icon" },
 				{ "win_icon" },
 				{ "text_ilvl" },
+				{ "roll_highlight", width = "double" },
+				{ "roll_highlight_upgrade", requires = "roll_highlight" },
+				{ "roll_highlight_newlook", requires = "roll_highlight" },
+				{ "roll_urgency" },
 			}},
 			{ "font", "group", {
 				{ "font", fonts },
@@ -633,6 +661,12 @@ function addon:OnEnable() -- Construct addon option tables here
 				{ "expiration", "header" },
 				{ "expire_won", "range", 5, 30, 1 },
 				{ "expire_lost", "range", 5, 30, 1 },
+			}},
+			{ "autoroll", "group", {
+				{ "auto_roll", width = "double" },
+				{ "auto_roll_need", requires = "auto_roll" },
+				{ "auto_roll_rules_display", "description", name = function() return XLootGroup.AutoRollRulesText() end },
+				{ "auto_roll_clear", "execute", requires = "auto_roll", confirm = true, func = function() XLootGroup.ClearAutoRollRules() end },
 			}},
 		})
 	end
@@ -658,19 +692,24 @@ function addon:OnEnable() -- Construct addon option tables here
 			}},
 			{ "filters", "group", {
 				{ "show_coin", name = MONEY },
+				{ "show_system_coin" },
 				{ "show_currency", name = CURRENCY },
 				{ "show_crafted" },
 			}, name = FILTERS },
 			{ "fading", "group", {
-				{ "fade_own", "range", 1, 30, 1, name = L.items_own },
-				{ "fade_other", "range", 1, 30, 1, name = L.items_others },
+				{ "fade_own", "range", 1, 10800, 1, 1, 60, 1, name = L.items_own },
+				{ "fade_other", "range", 1, 10800, 1, 1, 60, 1, name = L.items_others },
 			}},
 			{ "details", "group", {
+				{ "rightclick_dismiss", width = "double" },
 				{ "show_totals", width = "double" },
 				{ "use_altoholic", requires = "show_totals" },
 				{ "totals_delay", "range", 0.1, 1.0, 0.1 },
 				{ "name_width", "range", 25, 200, 5 },
 				{ "show_ilvl", name = L.Group.text_ilvl },
+			}},
+			{ "blizzard_alerts", "group", {
+				{ "suppress_loot_toasts", width = "double" },
 			}},
 			{ "font", "group", {
 				{ "font", fonts },

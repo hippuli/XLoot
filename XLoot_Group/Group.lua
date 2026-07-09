@@ -5,6 +5,7 @@ XLootGroup = addon
 -- Grab locals
 local opt, anchor, alert_anchor, mouse_focus, Skinner
 local rolls = {}
+local auto_rolled = {}
 local GetLootRollItemInfo, GetLootRollItemLink, GetLootRollTimeLeft, RollOnLoot, UnitGroupRolesAssigned, print, string_format
 	= GetLootRollItemInfo, GetLootRollItemLink, GetLootRollTimeLeft, RollOnLoot, UnitGroupRolesAssigned, print, string.format
 -- C_LootHistory is nil on some Classic builds; indexing it at file load would crash the module.
@@ -12,6 +13,7 @@ local HistoryGetItem = C_LootHistory and C_LootHistory.GetItem
 local HistoryGetPlayerInfo = C_LootHistory and C_LootHistory.GetPlayerInfo
 local HistoryGetNumItems = C_LootHistory and C_LootHistory.GetNumItems
 local CanEquipItem, IsItemUpgrade, FancyPlayerName = XLoot.CanEquipItem, XLoot.IsItemUpgrade, XLoot.FancyPlayerName
+local IsIlvlUpgrade, IsNewAppearance, TimeFractionColor = XLoot.IsIlvlUpgrade, XLoot.IsNewAppearance, XLoot.TimeFractionColor
 local RollFramePrototype
 
 local BUILD_NUMBER = select(4, GetBuildInfo())
@@ -21,6 +23,24 @@ local HAS_TRANSMOG = IS_RETAIL
 
 local GetItemInfo = C_Item and C_Item.GetItemInfo or GetItemInfo
 local GetDetailedItemLevelInfo = C_Item and C_Item.GetDetailedItemLevelInfo or GetDetailedItemLevelInfo
+local GetItemInfoInstant = C_Item and C_Item.GetItemInfoInstant or GetItemInfoInstant
+local issecret = issecretvalue -- 12.0 secret values; nil pre-12.0
+
+local ENUM_LOOT_GROUP = Enum and Enum.LootMethod and Enum.LootMethod.Group
+local ENUM_LOOT_NEEDBEFOREGREED = Enum and Enum.LootMethod and Enum.LootMethod.Needbeforegreed
+
+-- The string GetLootMethod() global is gone on modern Classic/retail builds; prefer the C_PartyInfo enum, fall back to the global.
+local function RollBasedLootMethod()
+	if ENUM_LOOT_GROUP and C_PartyInfo and C_PartyInfo.GetLootMethod then
+		local method = C_PartyInfo.GetLootMethod()
+		return method == ENUM_LOOT_GROUP or method == ENUM_LOOT_NEEDBEFOREGREED
+	end
+	if GetLootMethod then
+		local method = GetLootMethod()
+		return method == 'group' or method == 'needbeforegreed'
+	end
+	return false
+end
 
 -------------------------------------------------------------------------------
 -- Settings
@@ -33,6 +53,15 @@ local defaults = {
 		show_undecided = false,
 		show_time_remaining = false,
 		text_ilvl = false,
+		roll_urgency = false,
+
+		roll_highlight = false,
+		roll_highlight_upgrade = true,
+		roll_highlight_newlook = true,
+
+		auto_roll = false,
+		auto_roll_need = false,
+		auto_roll_rules = {},
 
 		equip_prefix = true,
 		prefix_equippable = "*",
@@ -104,6 +133,7 @@ function addon:OnEnable()
 	-- Register events
 	eframe:RegisterEvent('START_LOOT_ROLL')
 	eframe:RegisterEvent('MODIFIER_STATE_CHANGED')
+	eframe:RegisterEvent('CONFIRM_LOOT_ROLL')
 
 	if IS_RETAIL then
 		eframe:RegisterEvent('CANCEL_LOOT_ROLL')
@@ -181,7 +211,7 @@ function addon:OnEnable()
 	end
 
 	-- Find and show active rolls
-	if IsInGroup() and (IS_RETAIL or GetLootMethod() == 'group' or GetLootMethod() == 'needbeforegreed') then
+	if IsInGroup() and (IS_RETAIL or RollBasedLootMethod()) then
 		for i=1,300 do
 			local time = GetLootRollTimeLeft(i)
 			if time > 0 and time <  300000 then
@@ -206,19 +236,48 @@ local type_strings = {
 }
 local rtypes = { [0] = 'pass', 'need', 'greed', 'disenchant' } -- Tekkub. Writing smaller addons than me since ever.
 
+-- Roll-border highlight colors, matched to the (upgrade)/(new look) loot-row tags
+local HIGHLIGHT_UPGRADE, HIGHLIGHT_NEWLOOK = { 30/255, 1, 0 }, { 102/255, 204/255, 1 }
+
+local function RollBorderColor(link, r, g, b)
+	if opt.roll_highlight and link and not (issecret and issecret(link)) then
+		if opt.roll_highlight_upgrade and IsIlvlUpgrade(link) then
+			return unpack(HIGHLIGHT_UPGRADE)
+		elseif opt.roll_highlight_newlook and IsNewAppearance(link) then
+			return unpack(HIGHLIGHT_NEWLOOK)
+		end
+	end
+	return r, g, b
+end
+
 function addon:START_LOOT_ROLL(id, length, ongoing)
 	local icon, name, count, quality, bop, need, greed, de, reason_need, reason_greed, reason_de, de_skill, can_transmog = GetLootRollItemInfo(id)
-	-- LootFrame.lua includes this sanity check
-	if name == nil then
+	-- LootFrame.lua includes this sanity check (== nil is a blocked op on a secret name; not is allowed)
+	if not name then
 		print('XLoot Group: Ignoring START_LOOT_ROLL with no name')
 		return
 	end
 	local link = GetLootRollItemLink(id)
 	local r, g, b = C_Item.GetItemQualityColor(quality)
 
+	-- Clear any stale marker so a recycled id can't auto-confirm a later manual roll.
+	auto_rolled[id] = nil
+	if opt.auto_roll and link and not (issecret and issecret(link)) and not XLoot.GroupUsesMasterLoot() then
+		local itemid = GetItemInfoInstant(link)
+		local rule = itemid and opt.auto_roll_rules[itemid]
+		if rule and (rule == 0
+			or (rule == 2 and greed)
+			or (rule == 1 and need and opt.auto_roll_need)
+			or (rule == 3 and de)) then
+			RollOnLoot(id, rule)
+			auto_rolled[id] = true
+			return
+		end
+	end
+
 	local start = length
 	if ongoing then
-		if quality == 2 then
+		if not (issecret and issecret(quality)) and quality == 2 then
 			length = 60000
 		else
 			length = 180000
@@ -289,13 +348,16 @@ function addon:START_LOOT_ROLL(id, length, ongoing)
 
 	frame.text_bind:SetText(bop and '|cffff4422BoP' or '')
 	frame.text_loot:SetText(name)
-	local ilvl = GetDetailedItemLevelInfo(link)
+	local ilvl = not (issecret and issecret(link)) and GetDetailedItemLevelInfo(link)
 	frame.text_ilvl:SetText(ilvl and ilvl > 1 and ilvl or nil)
 
 	frame.text_loot:SetVertexColor(r, g, b)
-	frame.overlay:SetBorderColor(r, g, b)
-	frame.icon_frame:SetBorderColor(r, g, b)
+	local br, bg, bb = RollBorderColor(link, r, g, b)
+	frame.overlay:SetBorderColor(br, bg, bb)
+	frame.icon_frame:SetBorderColor(br, bg, bb)
 	bar:SetStatusBarColor(r, g, b, .7)
+	bar.base_r, bar.base_g, bar.base_b = r, g, b
+	bar.base_br, bar.base_bg, bar.base_bb = br, bg, bb
 	frame.icon:SetTexture(icon)
 
 	bar:SetMinMaxValues(0, length)
@@ -306,6 +368,7 @@ function addon:START_LOOT_ROLL(id, length, ongoing)
 end
 
 function addon:CANCEL_LOOT_ROLL(id)
+	auto_rolled[id] = nil
 	local frame = rolls[id]
 	if frame then
 		anchor:Pop(frame)
@@ -313,9 +376,56 @@ function addon:CANCEL_LOOT_ROLL(id)
 end
 
 function addon:CANCEL_ALL_LOOT_ROLLS()
+	wipe(auto_rolled)
 	for _, frame in pairs(rolls) do
 		anchor:Pop(frame)
 	end
+end
+
+-- Rules change from shift-clicks outside the options dialog, so nudge AceConfig to redraw the live list.
+local function NotifyOptions()
+	local reg = LibStub("AceConfigRegistry-3.0", true)
+	if reg then reg:NotifyChange("XLoot") end
+end
+
+function addon:CONFIRM_LOOT_ROLL(rollid, rtypeid)
+	if auto_rolled[rollid] then
+		ConfirmLootRoll(rollid, rtypeid)
+		StaticPopup_Hide("CONFIRM_LOOT_ROLL")
+		auto_rolled[rollid] = nil
+	end
+end
+
+function addon.ToggleAutoRollRule(link, rtypeid)
+	if rtypes[rtypeid] == nil or (issecret and issecret(link)) then return end
+	local itemid = GetItemInfoInstant(link)
+	if not itemid then return end
+	local name = GetItemInfo(itemid) or link
+	if opt.auto_roll_rules[itemid] == rtypeid then
+		opt.auto_roll_rules[itemid] = nil
+		print(L.auto_roll_removed:format(name))
+	else
+		opt.auto_roll_rules[itemid] = rtypeid
+		print(L.auto_roll_saved:format(rtypes[rtypeid], name))
+	end
+	NotifyOptions()
+end
+
+function addon.ClearAutoRollRules()
+	wipe(opt.auto_roll_rules)
+	NotifyOptions()
+end
+
+function addon.AutoRollRulesText()
+	local lines = {}
+	for itemid, rtypeid in pairs(opt.auto_roll_rules) do
+		lines[#lines+1] = ("%s: %s"):format(GetItemInfo(itemid) or ('item:'..itemid), rtypes[rtypeid] or '?')
+	end
+	if #lines == 0 then
+		return L.auto_roll_none
+	end
+	table.sort(lines)
+	return table.concat(lines, "\n")
 end
 
 local tidx = { [0] = 1, [3] = 2, [2] = 2, [1] = 3 }
@@ -680,7 +790,15 @@ do
 	local RollButtonPrototype = XLoot.NewPrototype()
 	do
 		function RollButtonPrototype:OnClick()
-			RollOnLoot(self.parent.rollid, self.type)
+			local parent = self.parent
+			if IsShiftKeyDown() then
+				-- Transmog (type 4) has no rtypes entry, so only rule-able buttons set a rule.
+				if parent.link and rtypes[self.type] then
+					addon.ToggleAutoRollRule(parent.link, self.type)
+				end
+				return
+			end
+			RollOnLoot(parent.rollid, self.type)
 		end
 
 		function RollButtonPrototype:Toggle(status)
@@ -853,6 +971,14 @@ do
 		else
 			local now, length = max(remaining, -1), self.length
 			local fraction = max(0, min(now / length, 1))
+			if opt.roll_urgency and self.base_r then
+				local ur, ug, ub = TimeFractionColor(fraction, self.base_r, self.base_g, self.base_b)
+				self:SetStatusBarColor(ur, ug, ub, .7)
+				-- The fill shrinks as time runs out, so redden the always-full row border too, ramping from the highlight color it started at.
+				local pr, pg, pb = TimeFractionColor(fraction, self.base_br, self.base_bg, self.base_bb)
+				self.parent.overlay:SetBorderColor(pr, pg, pb)
+				self.parent.icon_frame:SetBorderColor(pr, pg, pb)
+			end
 			self.spark:SetPoint('CENTER', self, 'LEFT', fraction * self:GetWidth(), 0)
 			self:SetValue(now)
 			self.spark:Show()
@@ -981,6 +1107,13 @@ do
 
 		-- Status bar is reskinned with SkinUpdate
 
+		-- Drop any urgency tint so turning the option off mid-roll restores the quality fill and highlight border.
+		if self.bar.base_r then
+			self.bar:SetStatusBarColor(self.bar.base_r, self.bar.base_g, self.bar.base_b, .7)
+			self.overlay:SetBorderColor(self.bar.base_br, self.bar.base_bg, self.bar.base_bb)
+			self.icon_frame:SetBorderColor(self.bar.base_br, self.bar.base_bg, self.bar.base_bb)
+		end
+
 		self.need:ApplyOptions()
 		self.greed:ApplyOptions()
 		if self.disenchant then self.disenchant:ApplyOptions() end
@@ -1016,8 +1149,9 @@ function addon:SkinUpdate()
 		local link = bar.parent.link
 		if link then
 			local r, g, b = C_Item.GetItemQualityColor(select(3, GetItemInfo(link)))
-			bar.parent.overlay:SetBorderColor(r, g, b)
-			bar.parent.icon_frame:SetBorderColor(r, g, b)
+			local br, bg, bb = RollBorderColor(link, r, g, b)
+			bar.parent.overlay:SetBorderColor(br, bg, bb)
+			bar.parent.icon_frame:SetBorderColor(br, bg, bb)
 		end
 	end
 
@@ -1048,11 +1182,14 @@ end
 -- Test rolls
 ---------------------------------------------------------------------------
 local preview_loot = {
-	{ 52722, false, true, true, true },
-	{ 31304, true, false, true, true, 1 },
-	{ 37254, true, false, false, true, 2, 2 },
-	{ 13262, true, false, false, false, 4, 4, 4, 69 },
-	{ 15487, false, true, true, true }
+	{ 249288, true, true, true, true },
+	{ 258412, true, true, true, true },
+	{ 193701, false, true, true, true },
+	{ 249805, true, true, true, true },
+	{ 249339, true, false, true, true },
+	{ 260188, true, true, true, true },
+	{ 249659, true, true, true, false },
+	{ 249626, false, true, true, true }
 }
 -- Activate items
 for i, t in ipairs(preview_loot) do
@@ -1069,7 +1206,6 @@ function XLootGroup.TestSettings()
 	local schedule = {}
 	local type_index = { 'need', 'greed', 'disenchant', [0] = 'pass' }
 	if not init then
-		print(L.debug_warning)
 		init = true
 		local tick = 0
 		deframe:SetScript('OnUpdate', function(self, elapsed)
@@ -1153,10 +1289,10 @@ function XLootGroup.TestSettings()
 			return _HistoryGetPlayerInfo and _HistoryGetPlayerInfo(hid, pid)
 		end
 
-		function StartFakeRoll()
+		function StartFakeRoll(index)
 			local fake = {}
 
-			local item = preview_loot[random(1, #preview_loot)]
+			local item = preview_loot[index or random(1, #preview_loot)]
 			local iname, ilink, iquality, _, _, _, _, _, _, itex = GetItemInfo(item[1])
 
 			local rollid = #FakeHistory.rolls + 1
@@ -1184,7 +1320,9 @@ function XLootGroup.TestSettings()
 		end
 
 	end
-	StartFakeRoll()
+	for i = 1, #preview_loot do
+		StartFakeRoll(i)
+	end
 end
 
 XLoot:SetSlashCommand('xlgd', XLootGroup.TestSettings)

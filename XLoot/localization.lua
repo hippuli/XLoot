@@ -72,13 +72,11 @@ locales.koKR["skin_svelte"] = "XLoot: Svelte"
 -- Core
 
 -- Core
-locales.ruRU["anchor_hide"] = "скрыть "
-locales.ruRU["anchor_hide_desc"] = [=[Заблокируйте положение этого модуля
-Это позволит скрыть якорь,
-но он может быть показан еще раз в настройках]=]
-locales.ruRU["skin_legacy"] = "XLoot: Legacy"
-locales.ruRU["skin_smooth"] = "XLoot: Smooth"
-locales.ruRU["skin_svelte"] = "XLoot: Svelte"
+locales.ruRU["anchor_hide"] = "скрыть"
+locales.ruRU["anchor_hide_desc"] = "Зафиксируйте этот модуль в нужном положении. Это скроет крепление, но его можно будет снова отобразить в настройках."
+locales.ruRU["skin_legacy"] = "XLoot: Наследие"
+locales.ruRU["skin_smooth"] = "XLoot: Плавный"
+locales.ruRU["skin_svelte"] = "XLoot: Стройный"
 
 -- Core
 locales.zhCN["anchor_hide"] = "隐藏"

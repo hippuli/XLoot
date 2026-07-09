@@ -1,7 +1,7 @@
-## Interface: 11508, 20505, 50504, 120001, 120005, 120007
+## Interface: 11508, 20505, 50504, 120100, 120007, 120005
 ## Title: XLoot
 ## Notes: Core module for Loot and Looting-related UI improvements. Thank you to J.N., A.J.C., R.L., E.V., B.Y., J.C., R.P., R.R., and K.K. for your donations over the years.
-## Version: 12.7.0
+## Version: 12.11.0
 ## Author: Xuerian
 ## X-Category: Inventory
 ## X-Name: XLoot
@@ -20,5 +20,7 @@ skins.lua
 SKIN_TWEAKS.lua
 stacks.lua
 helpers.lua
+tooltip.lua
+whatsnew.lua
 
 

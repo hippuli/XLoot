@@ -1,7 +1,7 @@
-## Interface: 11508, 20505, 50504, 120001, 120005, 120007
+## Interface: 11508, 20505, 50504, 120100, 120007, 120005
 ## Title: XLoot Master
 ## Notes: Configurable Master Looter interface
-## Version: 12.7.0
+## Version: 12.11.0
 ## Author: Xuerian, Dridzt
 ## X-Category: Inventory
 

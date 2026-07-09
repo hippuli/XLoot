@@ -8,6 +8,12 @@ local locales = {
 			skin_desc = "Select skin to use. Includes Masque skins",
 			skin_anchors = "Apply to anchors",
 			skin_anchors_desc = "Apply skin to anchors that XLoot uses",
+			tooltip_sell = "Vendor sell price in tooltips",
+			tooltip_sell_desc = "Add a vendor sell-price line to item tooltips, including the full value of a stack (e.g. 20 x 6s). Applies everywhere item tooltips appear.",
+			whatsnew_show = "Show What's New now",
+			whatsnew_show_desc = "Reopen the What's New summary for the current version.",
+			whatsnew_mode = "After an update",
+			whatsnew_mode_desc = "Choose how XLoot tells you about new features after an update: open the What's New popup automatically, post a quiet clickable link in chat, or show nothing.",
 			reset_defaults = "Reset to Defaults",
 			reset_defaults_desc = "Reset all XLoot settings in the current profile back to their defaults.",
 			discord = "Join our Discord!",
@@ -41,6 +47,10 @@ local locales = {
 			autoloot_value_desc = "When to automatically loot items worth at least the minimum price",
 			autoloot_value_minprice = "Minimum price (gold)",
 			autoloot_value_minprice_desc = "Only auto loot when the looted stack's total vendor value is at least this many gold (0 means any sellable item)",
+			autoloot_quality = "Auto loot by quality",
+			autoloot_quality_desc = "When to automatically loot any item at or above the minimum quality below, whatever its type",
+			autoloot_quality_min = "Minimum quality",
+			autoloot_quality_min_desc = "Only auto loot items of this quality or higher (Poor means everything)",
 			autoloot_all = "Auto loot everything",
 			speedy_autoloot = "Speedy auto-loot",
 			speedy_autoloot_desc = "Vacuum every loot slot the instant loot is available, one item per server tick (paced to avoid the disconnect on big AoE piles) and without showing the loot window. Off by default. Ignores the per-item filters below unless \"Only speedy-loot filtered items\" is on. Hold your auto-loot-toggle modifier to skip Speedy and get the normal window for one loot.",
@@ -73,10 +83,18 @@ local locales = {
 			loot_texts_lock = "Show locked status",
 			loot_texts_sell = "Show vendor sell price",
 			loot_texts_sell_desc = "Display each item's total vendor sell value on the loot row",
+			loot_texts_newlook = "Show new-appearance tag",
+			loot_texts_newlook_desc = "Tag gear whose transmog appearance you haven't collected from any source yet with a cyan (new look). Retail only.",
+			loot_texts_upgrade = "Show upgrade tag",
+			loot_texts_upgrade_desc = "Tag looted weapons and armor with a green (upgrade) when their item level beats what you have equipped in that slot (same weapon/armor type).",
 			loot_buttons_auto = "Autoloot shortcut",
 			loot_buttons_auto_desc = "A button to add any item to your auto-looting list (See below)\nOnly shown when the item would be autolooted",
 			font_size_info = "Loot information",
 			font_size_bottombuttons = "Linkall/Close",
+			font_flag_loot = "Font outline",
+			font_flag_loot_desc = "Outline style for the item name and information text in the loot window.",
+			font_flag = "Detail outline",
+			font_flag_desc = "Outline style for the smaller loot-row texts: the stack count, the bind (BoE/BoP) tag, and the row buttons.",
 			frame_snap = "Snap frame to mouse",
 			frame_snap_offset_x = "Horizontal snap offset",
 			frame_snap_offset_y = "Vertical snap offset",
@@ -87,8 +105,10 @@ local locales = {
 			linkall_channel_secondary = "Secondary chat link channel",
 			linkall_show = "Link button visibility",
 			linkall_first_only = "Only link top item",
+			linkall_auto = "Announce loot on open",
+			linkall_auto_desc = "Automatically link loot to the default chat link channel when a loot window opens, using the quality threshold above. Each loot source is only announced once.",
 
-			autolooting_text = "XLoot's autolooting features act separately from the default UI. As such, if both are enabled, you may recieve warnings like 'that object is busy'. They are safe to ignore, but can be resolved by picking one autoloot method to use exclusively.",
+			autolooting_text = "Everything in this section is XLoot's own auto-loot, a separate system from Blizzard's built-in Auto Loot (the game's own setting, in Esc > Options). XLoot can vacuum a whole corpse instantly (Speedy auto-loot) or auto-grab only the items matching your filters below. Avoid running it alongside Blizzard's Auto Loot: two systems looting the same corpse causes harmless 'that object is busy' warnings. Pick one to do your looting.",
 
 			autolooting_list = "To automatically loot specific items, list them below.\n  Example: Linen Cloth,Ashbringer,Copper Ore",
 
@@ -100,6 +120,7 @@ local locales = {
 		Group = {
 			panel_title = "Group Loot",
 			-- Group labels
+			testing = "Testing",
 			anchors = "Anchors",
 			rolls = "Roll frames",
 			other_frames = "Other frames",
@@ -111,11 +132,27 @@ local locales = {
 			expiration = "Expiration (in seconds)",
 
 			-- Option labels
+			test_settings = "Click to test settings",
 			text_outline = "Outline text",
 			text_outline_desc = "Draws a dark outline around text on roll frames",
 			text_time = "Show time remaining",
 			text_time_desc = "Displays seconds remaining to roll over item icon",
 			text_ilvl = "Show item level",
+			roll_highlight = "Highlight relevant rolls",
+			roll_highlight_desc = "Recolors the roll window border when the drop is an upgrade or an appearance you have not collected, so you can tell at a glance whether to roll.",
+			roll_highlight_upgrade = "Item level upgrades",
+			roll_highlight_upgrade_desc = "Use a green border when the item's item level beats what you have equipped.",
+			roll_highlight_newlook = "Uncollected appearances",
+			roll_highlight_newlook_desc = "Use a blue border when you have not collected the item's appearance yet (retail only).",
+			roll_urgency = "Urgent timer color",
+			roll_urgency_desc = "Turns the roll countdown bar increasingly red as time runs out.",
+			auto_roll = "Roll automatically",
+			auto_roll_desc = "Automatically Need, Greed, or Pass on items you have a rule for. Shift-click a roll button on the roll window to set or clear that item's rule.",
+			auto_roll_need = "Allow auto-Need",
+			auto_roll_need_desc = "Also cast Need automatically. Off by default, so a rule can never Need an item for you without your say-so.",
+			auto_roll_clear = "Clear all rules",
+			auto_roll_clear_desc = "Remove every saved auto-roll rule.",
+			autoroll = "Auto Roll",
 			role_icon = "Show role icons",
 			win_icon = "Show winning type icon",
 			show_decided = "Show decided",
@@ -160,6 +197,8 @@ local locales = {
 			test_settings = "Click to test settings",
 			visible = "Anchor visible",
 			show_crafted = "Crafted",
+			show_system_coin = "System gold",
+			show_system_coin_desc = "Also show gold reported only as a system message (never as normal loot), such as world-quest rewards, quest turn-in gold, and reward containers like Sky Racer's Purse. Independent of the Money filter.",
 			show_totals = "Show total items in inventory",
 			totals_delay = "Totals delay",
 			totals_delay_desc = "Time to wait before asking the game how many items you have, as the item events do not reliably match up to inventory counts",
@@ -174,6 +213,11 @@ local locales = {
 			monitor_color_border_desc = "Border color for loot rows when quality coloring is turned off.",
 			color_all_rows = "Color all rows",
 			color_all_rows_desc = "Also apply your row border color to coin and currency rows, not just items, so the whole monitor matches.",
+			rightclick_dismiss = "Right-click to dismiss rows",
+			rightclick_dismiss_desc = "Right-click a monitor row to remove it early instead of waiting for it to fade. Remaining rows shift up to close the gap.",
+			blizzard_alerts = "Blizzard loot alerts",
+			suppress_loot_toasts = "Hide Blizzard loot pop-ups",
+			suppress_loot_toasts_desc = "Suppress Blizzard's default loot toast pop-ups, the ones that slide in when you loot an item, coin, upgrade, or legendary (the blocks you see when opening lots of chests). XLoot's own Loot Monitor still shows everything, and non-loot alerts such as achievements, recipes, pets, mounts, and PvP honor are left alone. Off by default. Takes effect immediately, no reload needed.",
 		},
 		Master = {
 			panel_title = "Loot Master",
@@ -226,6 +270,9 @@ local locales = {
 		when_group = "In groups",
 		when_party = "In parties",
 		when_raid = "In raids",
+		whatsnew_mode_popup = "Popup window",
+		whatsnew_mode_chat = "Chat link",
+		whatsnew_mode_none = "None",
 		confirm_reset_profile = "This will reset all options for this profile. Are you sure?",
 		profile = "Profile",
 		message_reloadui_warning = "|c2244dd22%s|r: Changing |c2244dd22%s|r requires you to reload your UI before continuing to play: |c2244dd22/reload ui|r",
@@ -321,34 +368,31 @@ locales.koKR["width"] = "너비"
 
 -- Options
 locales.ruRU["alpha"] = "Прозрачность"
-locales.ruRU["bottom"] = [=[Внизу
-]=]
-locales.ruRU["confirm_reset_profile"] = "Это сбросит все параметры этого профиля. Вы уверены?"
+locales.ruRU["bottom"] = "Внизу"
+locales.ruRU["confirm_reset_profile"] = "Это сбросит все параметры для этого профиля. Вы уверены?"
 locales.ruRU["desc_channel_auto"] = "Наивысший из доступных"
 locales.ruRU["down"] = "Вниз"
-locales.ruRU["font"] = "Шрифт "
+locales.ruRU["font"] = "Шрифт"
 locales.ruRU["font_flag"] = "Флажок"
-locales.ruRU["font_size_loot"] = "Добыча "
-locales.ruRU["font_size_quantity"] = "Количество "
-locales.ruRU["font_sizes"] = "Размеры "
+locales.ruRU["font_size_loot"] = "Добыча"
+locales.ruRU["font_size_quantity"] = "Количество"
+locales.ruRU["font_sizes"] = "Размеры"
 locales.ruRU["growth_direction"] = "Добавлять новые строки"
 locales.ruRU["items_others"] = "Остальные вещи"
 locales.ruRU["items_own"] = "Ваши вещи"
 locales.ruRU["minimum_quality"] = "Минимальное качество"
-locales.ruRU["padding"] = [=[Заполнение
-]=]
+locales.ruRU["padding"] = "Заполнение"
 locales.ruRU["profile"] = "Профиль"
 locales.ruRU["scale"] = "Масштаб"
-locales.ruRU["top"] = [=[Вверх
-]=]
+locales.ruRU["top"] = "Вверх"
 locales.ruRU["up"] = "Вверх"
 locales.ruRU["visible"] = "Видимый"
 locales.ruRU["when_always"] = "Всегда"
 locales.ruRU["when_auto"] = "Автоматически"
-locales.ruRU["when_group"] = "В группе "
+locales.ruRU["when_group"] = "В группе"
 locales.ruRU["when_never"] = "Никогда"
-locales.ruRU["when_party"] = "В группе "
-locales.ruRU["when_raid"] = "В рейде "
+locales.ruRU["when_party"] = "В группе"
+locales.ruRU["when_raid"] = "В рейде"
 locales.ruRU["when_solo"] = "Соло"
 locales.ruRU["width"] = "Ширина"
 
@@ -446,13 +490,11 @@ locales.koKR["skin_svelte"] = "XLoot: Svelte"
 -- Core
 
 -- Core
-locales.ruRU["anchor_hide"] = "скрыть "
-locales.ruRU["anchor_hide_desc"] = [=[Заблокируйте положение этого модуля
-Это позволит скрыть якорь,
-но он может быть показан еще раз в настройках]=]
-locales.ruRU["skin_legacy"] = "XLoot: Legacy"
-locales.ruRU["skin_smooth"] = "XLoot: Smooth"
-locales.ruRU["skin_svelte"] = "XLoot: Svelte"
+locales.ruRU["anchor_hide"] = "скрыть"
+locales.ruRU["anchor_hide_desc"] = "Зафиксируйте этот модуль в нужном положении. Это скроет крепление, но его можно будет снова отобразить в настройках."
+locales.ruRU["skin_legacy"] = "XLoot: Наследие"
+locales.ruRU["skin_smooth"] = "XLoot: Плавный"
+locales.ruRU["skin_svelte"] = "XLoot: Стройный"
 
 -- Core
 locales.zhCN["anchor_hide"] = "隐藏"
@@ -549,9 +591,9 @@ locales.koKR["undecided"] = "미결정"
 locales.esMX["alert_anchor"] = "Ventanas emergentes de botín"
 
 -- Group
-locales.ruRU["alert_anchor"] = "Всплывающие фреймы добычи."
+locales.ruRU["alert_anchor"] = "Всплывающие окна с добычей"
 locales.ruRU["anchor"] = "Броски группы"
-locales.ruRU["undecided"] = "Не принял решения"
+locales.ruRU["undecided"] = "Не определился"
 
 -- Group
 locales.zhCN["alert_anchor"] = "掷骰弹窗锚点"

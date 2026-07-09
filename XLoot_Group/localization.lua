@@ -4,7 +4,9 @@ local locales = {
 		anchor = "Group Rolls",
 		alert_anchor = "Loot Popups",
 		undecided = "Undecided",
-		debug_warning = "|c22ff0000XLoot Group: Entering debugging mode. THIS BREAKS LOOTING UNTIL YOU RELOG OR /RELOAD.",
+		auto_roll_saved = "XLoot: auto-%s set for %s",
+		auto_roll_removed = "XLoot: auto-roll cleared for %s",
+		auto_roll_none = "No rules yet. Shift-click Need, Greed, or Pass on a roll to add one.",
 	},
 	-- Possibly localized
 	ptBR = {
@@ -56,9 +58,9 @@ locales.koKR["undecided"] = "미결정"
 locales.esMX["alert_anchor"] = "Ventanas emergentes de botín"
 
 -- Group
-locales.ruRU["alert_anchor"] = "Всплывающие фреймы добычи."
+locales.ruRU["alert_anchor"] = "Всплывающие окна с добычей"
 locales.ruRU["anchor"] = "Броски группы"
-locales.ruRU["undecided"] = "Не принял решения"
+locales.ruRU["undecided"] = "Не определился"
 
 -- Group
 locales.zhCN["alert_anchor"] = "掷骰弹窗锚点"

@@ -55,6 +55,8 @@ local LOOT_SLOT_CURRENCY = LOOT_SLOT_CURRENCY or Enum.LootSlotType.Currency
 
 local GetContainerNumFreeSlots = C_Container and C_Container.GetContainerNumFreeSlots or GetContainerNumFreeSlots
 local GetItemInfo = C_Item and C_Item.GetItemInfo or GetItemInfo
+local SendChatMessage = XLoot.SendChatMessage
+local issecret = issecretvalue -- 12.0 secret values; nil pre-12.0
 
 -- Chat output
 local print, wprint = print, print
@@ -108,6 +110,8 @@ local defaults = {
 		loot_texts_bind  = true,
 		loot_texts_lock = true,
 		loot_texts_sell = false,
+		loot_texts_newlook = false,
+		loot_texts_upgrade = false,
 
 		loot_buttons_auto = true,
 
@@ -118,6 +122,7 @@ local defaults = {
 		font_size_bottombuttons = 10,
 		font_size_button_auto = 8,
 		font_flag = "OUTLINE",
+		font_flag_loot = "",
 
 		loot_icon_size = 34,
 		loot_row_height = 30,
@@ -149,6 +154,7 @@ local defaults = {
 			quest = 'never',
 			gear = 'never',
 			value = 'never',
+			quality = 'never',
 			list = 'solo',
 			all = 'never',
 		},
@@ -158,6 +164,7 @@ local defaults = {
 		autoloot_gear_quality = 0, -- Quality 0 - 6, Poor - Artifact
 		autoloot_gear_minlevel = 0,
 		autoloot_value_minprice = 0, -- Gold; sellPrice is copper (x10000)
+		autoloot_quality_min = 2, -- Quality 0 - 6; inert until the 'quality' when-state leaves 'never'
 
 		speedy_autoloot = false,
 		speedy_autoloot_respect_filters = false,
@@ -169,6 +176,7 @@ local defaults = {
 		linkall_channel_secondary = 'NONE',
 		linkall_show = 'group',
 		linkall_first_only = false,
+		linkall_auto = 'never',
 
 		old_close_button = false,
 
@@ -254,6 +262,7 @@ function addon:ApplyOptions(in_options)
 			else
 				t.quantity = 1
 				t.slotType = LOOT_SLOT_ITEM
+				t.preview_upgrade = (i == #preview_loot) -- force the (upgrade) demo tag on one preview row
 				slot = slot + 1
 				local row = Fake.rows[slot]
 				row.item = t.link
@@ -317,7 +326,7 @@ local IsGroupState = {
 local LinkLoot, LinkDropdown
 do
 	local output = { }
-	function LinkLoot(channel, isExtraChannel)
+	function LinkLoot(channel, silent)
 		local output, key, buffer = output, 1
 		local sf = string.format
 
@@ -333,7 +342,7 @@ do
 			if GetLootSlotType(i) == LOOT_SLOT_ITEM then
 				local _, _, quantity, _, rarity = GetLootSlotInfo(i)
 				local link = GetLootSlotLink(i)
-				if rarity >= linkthreshold then
+				if not (issecret and issecret(link)) and rarity >= linkthreshold then
 					reached = true
 					buffer = sf('%s%s%s', (output[key] and output[key].." " or ""), (quantity > 1 and quantity.."x" or ""), link)
 					if strlen(buffer) > 255 then
@@ -350,7 +359,9 @@ do
 		end
 
 		if not reached then
-			xprint(L.linkall_threshold_missed)
+			if not silent then
+				xprint(L.linkall_threshold_missed)
+			end
 			return false
 		end
 		if (channel == 'RAID' or channel == 'RAID_WARNING') and not IsInRaid() and IsInGroup() then
@@ -393,6 +404,39 @@ do
 			info.notCheckable = 1
 			UIDropDownMenu_AddButton(info, 1)
 		end
+	end
+end
+
+-- Reopening a partially looted corpse fires LOOT_OPENED again, so remember every source GUID and only auto-announce windows that contain a new one.
+local HasNewLootSources
+do
+	local announced, count = {}, 0
+	local function MarkSources(...)
+		local fresh = false
+		for i = 1, select('#', ...), 2 do
+			local guid = select(i, ...)
+			if guid and not (issecret and issecret(guid)) and not announced[guid] then
+				if count >= 1000 then
+					wipe(announced)
+					count = 0
+				end
+				announced[guid] = true
+				count = count + 1
+				fresh = true
+			end
+		end
+		return fresh
+	end
+
+	function HasNewLootSources()
+		if not GetLootSourceInfo then return true end
+		local fresh = false
+		for slot = 1, GetNumLootItems() do
+			if MarkSources(GetLootSourceInfo(slot)) then
+				fresh = true
+			end
+		end
+		return fresh
 	end
 end
 
@@ -558,6 +602,7 @@ do
 
 	function RowPrototype:Auto_OnClick(button)
 		self:Hide()
+		if issecret and issecret(self.parent.item_name) then return end
 		if opt.autoloot_item_list ~= '' then
 			opt.autoloot_item_list = opt.autoloot_item_list .. ',' .. self.parent.item_name
 		else
@@ -607,8 +652,8 @@ do
 
 
 		-- Text
-		self.text_name:SetFont(opt.font, opt.font_size_loot)
-		self.text_info:SetFont(opt.font, opt.font_size_info)
+		self.text_name:SetFont(opt.font, opt.font_size_loot, opt.font_flag_loot)
+		self.text_info:SetFont(opt.font, opt.font_size_info, opt.font_flag_loot)
 		self.text_sell:SetFont(opt.font, opt.font_size_info, opt.font_flag)
 		self.text_quantity:SetFont(opt.font, opt.font_size_quantity, opt.font_flag)
 		self.text_bind:SetFont(opt.font, 8, opt.font_flag)
@@ -661,6 +706,9 @@ do
 		-- account = 'BoA'
 	}
 
+	local NEW_LOOK = (' |cff66ccff%s|r'):format(L.new_look)
+	local UPGRADE = (' |cff1eff00%s|r'):format(L.upgrade)
+
 	-- Update slot with loot
 	function RowPrototype:Update(slotData)
 		local r, g, b, hex
@@ -675,6 +723,14 @@ do
 			r, g, b, hex = C_Item.GetItemQualityColor(slotData.quality or 0)
 
 			text_name = ('|c%s%s|r'):format(hex, slotData.name)
+
+			if opt.loot_texts_newlook and not slotData.secret and slotData.link and XLoot.IsNewAppearance(slotData.link) then
+				text_name = text_name..NEW_LOOK
+			end
+
+			if opt.loot_texts_upgrade and (slotData.preview_upgrade or (not slotData.secret and slotData.link and XLoot.IsIlvlUpgrade(slotData.link))) then
+				text_name = text_name..UPGRADE
+			end
 
 			if opt.loot_texts_info then -- This is a bit gnarly
 				local equip = slotData.typeName == ENCHSLOT_WEAPON and ENCHSLOT_WEAPON or slotData.equipLoc ~= '' and _G[slotData.equipLoc] or ''
@@ -692,7 +748,7 @@ do
 		-- Currency
 		else
 			r, g, b = .4, .4, .4
-			text_name = slotData.name:gsub('\n', ', ')
+			text_name = slotData.secret and slotData.name or slotData.name:gsub('\n', ', ')
 		end
 
 		-- Strings
@@ -743,7 +799,7 @@ do
 		end
 
 		-- Autoloot button
-		if opt.loot_buttons_auto and (self.owner.fake or (opt.autoloots.list ~= 'never' and slotData.slotType == LOOT_SLOT_ITEM and not self.owner.auto_items[slotData.name])) then
+		if opt.loot_buttons_auto and (self.owner.fake or (opt.autoloots.list ~= 'never' and slotData.slotType == LOOT_SLOT_ITEM and not slotData.secret and not self.owner.auto_items[slotData.name])) then
 			self.button_auto:Show()
 			name_width = name_width + self.button_auto:GetWidth() - 6
 		else
@@ -1169,30 +1225,20 @@ local function clear(slot)
 end
 
 local function BoPRefresh()
-	for i, row in pairs(XLootFrame.rows) do
-		clear(row)
+	if type(XLootFrame.rows) == 'table' then
+		for i, row in pairs(XLootFrame.rows) do
+			clear(row)
+		end
 	end
 	XLootFrame:Update(false, true)
 end
 
 local tremove = table.remove
-local MASTER_LOOT = Enum and Enum.LootMethod and Enum.LootMethod.Masterlooter
 local speedy = { queue = {}, ticker = nil, leftover = nil, lastcount = nil, vacuum = false }
-
--- Enum.LootMethod is absent on some flavors, so fall through to the string API before trusting the enum.
-local function SpeedyMasterLoot()
-	if MASTER_LOOT and C_PartyInfo and C_PartyInfo.GetLootMethod then
-		return C_PartyInfo.GetLootMethod() == MASTER_LOOT
-	end
-	if GetLootMethod and GetLootMethod() == 'master' then
-		return true
-	end
-	return GetMasterLootCandidate and GetMasterLootCandidate(1, 1) ~= nil or false
-end
 
 -- Never vacuum under master loot (would grab assignable drops) or while the auto-loot modifier is held.
 local function SpeedyAllowed()
-	return not IsModifiedClick('AUTOLOOTTOGGLE') and not SpeedyMasterLoot()
+	return not IsModifiedClick('AUTOLOOTTOGGLE') and not XLoot.GroupUsesMasterLoot()
 end
 
 local function SpeedyStop()
@@ -1257,7 +1303,7 @@ local function SpeedyVacuum()
 end
 
 local _bag_slots, GetItemBindType = {}, XLoot.GetItemBindType
-function XLootFrame:Update(no_snap, is_refresh)
+function XLootFrame:Update(no_snap, is_refresh, game_autoloot)
 	local numloot = GetNumLootItems()
 	if numloot == 0 then return nil end
 	local max = math.max
@@ -1302,11 +1348,12 @@ function XLootFrame:Update(no_snap, is_refresh)
 			end
 
 		else
-			local autoloot = false
+			local autoloot, secret = false, false
 			local slotType, slotData = GetLootSlotType(slot)
 			if slotType == LOOT_SLOT_ITEM then
 				local link = GetLootSlotLink(slot)
-				slotData = GetItemInfoTable(link)
+				secret = issecret and issecret(link) or false
+				slotData = not secret and GetItemInfoTable(link) or nil
 				-- Item not in client cache yet: render from loot-slot data, refresh shortly
 				if not slotData then
 					slotData = { name = name, icon = icon, quality = quality, link = link, stackCount = 1, bindType = 0 }
@@ -1318,6 +1365,7 @@ function XLootFrame:Update(no_snap, is_refresh)
 				slotData.isQuestItem = isQuestItem
 				slotData.questID = questID
 				slotData.startsQuest = startsQuest
+				if secret then slotData.secret, slotData.quality, slotData.quantity, slotData.locked, slotData.isQuestItem, slotData.questID, slotData.startsQuest = true, nil, 1, nil, nil, nil, nil end
 			else
 				slotData = {
 					name = name,
@@ -1331,10 +1379,11 @@ function XLootFrame:Update(no_snap, is_refresh)
 					-- startsQuest = startsQuest,
 					bindType = 0
 				}
+				if issecret and issecret(name) then slotData.secret, slotData.quality, slotData.quantity, slotData.locked = true, nil, 1, nil end
 			end
 
-			-- There's no reason to try to autoloot when refreshing the frame
-			if not is_refresh then
+			-- Skip our autoloot on refresh/secret/locked slots, or when the game is already auto-looting: it grabs the free items, so we just show the window for what is left (BoP confirms, read-only master-loot drops) instead of double-looting and stranding them.
+			if not is_refresh and not secret and not locked and not game_autoloot then
 				-- Autolooting currency
 				if (auto.all or auto.currency) and (slotType == LOOT_SLOT_MONEY or slotType == LOOT_SLOT_CURRENCY) then
 					autoloot = true
@@ -1346,6 +1395,7 @@ function XLootFrame:Update(no_snap, is_refresh)
 					auto.all
 					or (auto.list and auto_items[name])
 					or (auto.tradegoods and slotData.isCraftingReagent)
+					or (auto.quality and slotType == LOOT_SLOT_ITEM and (slotData.quality or 0) >= opt.autoloot_quality_min)
 					or (auto.gear
 						and slotData.equipLoc and slotData.equipLoc ~= ''
 						and (slotData.quality or 0) >= opt.autoloot_gear_quality
@@ -1469,7 +1519,11 @@ function addon:LOOT_READY()
 	end
 end
 
-function addon:LOOT_OPENED()
+function addon:LOOT_OPENED(autoLoot)
+	local announce_when = IsGroupState[opt.linkall_auto]
+	if announce_when and announce_when() and GetNumLootItems() > 0 and HasNewLootSources() then
+		LinkLoot(opt.linkall_channel, true)
+	end
 	if opt.speedy_autoloot and not opt.speedy_autoloot_respect_filters
 		and SpeedyAllowed() and GetNumLootItems() > 0 then
 		if not XLootFrame:IsShown() and IsFishingLoot() then
@@ -1482,7 +1536,8 @@ function addon:LOOT_OPENED()
 		if not XLootFrame:IsShown() and IsFishingLoot() then
 			PlaySound(SOUNDKIT.FISHING_REEL_IN)
 		end
-		XLootFrame:Update()
+		-- Normalize the LOOT_OPENED autoLoot arg: some older Classic clients pass 0/1, and 0 is truthy in Lua.
+		XLootFrame:Update(nil, nil, autoLoot and autoLoot ~= 0)
 	else
 		PlaySound(SOUNDKIT.LOOT_WINDOW_OPEN_EMPTY)
 		CloseLoot()

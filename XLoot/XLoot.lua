@@ -10,6 +10,12 @@ local defaults = {
 	profile = {
 		skin = "smooth",
 		skin_anchors = false,
+		tooltip_sell = false,
+		whatsnew_mode = "popup",
+	},
+	global = {
+		whatsnew_seen = "",
+		whatsnew_announced = "",
 	}
 }
 
@@ -176,5 +182,7 @@ function XLoot:OnEnable()
 	C_AddOns.EnableAddOn("XLoot_Options")
 	C_AddOns.LoadAddOn("XLoot_Options")
 	self:SetSlashCommand("xloot", function() self:ShowOptionPanel(self) end)
+
+	self:CheckWhatsNew()
 end
 
