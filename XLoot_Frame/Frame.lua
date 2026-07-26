@@ -326,12 +326,31 @@ local IsGroupState = {
 local LinkLoot, LinkDropdown
 do
 	local output = { }
+	-- Map a configured channel to one valid for the current group, or nil to skip. RAID_WARNING is privilege-gated and blocks as a protected call if auto-sent without raid lead or assist, so downgrade it.
+	local function ResolveChannel(channel)
+		if channel == 'RAID_WARNING' then
+			if IsInRaid() then
+				return (UnitIsGroupLeader('player') or UnitIsGroupAssistant('player')) and 'RAID_WARNING' or 'RAID'
+			end
+			return IsInGroup() and 'PARTY' or nil
+		elseif channel == 'RAID' then
+			return IsInRaid() and 'RAID' or (IsInGroup() and 'PARTY' or nil)
+		elseif channel == 'PARTY' or channel == 'INSTANCE_CHAT' then
+			return IsInGroup() and channel or nil
+		end
+		return channel
+	end
+
 	function LinkLoot(channel, silent)
 		local output, key, buffer = output, 1
 		local sf = string.format
+		wipe(output)
 
 		if UnitExists('target') then
-			output[1] = sf('%s:', UnitName('target'))
+			local target_name = UnitName('target')
+			if not (issecret and issecret(target_name)) then
+				output[1] = sf('%s:', target_name)
+			end
 		end
 
 		local linkthreshold, reached = opt.linkall_threshold
@@ -342,7 +361,7 @@ do
 			if GetLootSlotType(i) == LOOT_SLOT_ITEM then
 				local _, _, quantity, _, rarity = GetLootSlotInfo(i)
 				local link = GetLootSlotLink(i)
-				if not (issecret and issecret(link)) and rarity >= linkthreshold then
+				if not (issecret and (issecret(link) or issecret(rarity) or issecret(quantity))) and rarity >= linkthreshold then
 					reached = true
 					buffer = sf('%s%s%s', (output[key] and output[key].." " or ""), (quantity > 1 and quantity.."x" or ""), link)
 					if strlen(buffer) > 255 then
@@ -364,15 +383,12 @@ do
 			end
 			return false
 		end
-		if (channel == 'RAID' or channel == 'RAID_WARNING') and not IsInRaid() and IsInGroup() then
-			channel = 'PARTY'
-		end
+		local primary = ResolveChannel(channel)
+		local secondary = opt.linkall_channel_secondary ~= 'NONE' and ResolveChannel(opt.linkall_channel_secondary) or nil
 		for k, v in pairs(output) do
 			v = v:gsub("\n", " ")
-			SendChatMessage(v, channel)
-			if opt.linkall_channel_secondary ~= 'NONE' then
-				SendChatMessage(v, opt.linkall_channel_secondary)
-			end
+			if primary then SendChatMessage(v, primary) end
+			if secondary then SendChatMessage(v, secondary) end
 			output[k] = nil
 		end
 
@@ -722,7 +738,7 @@ do
 		if slotData.slotType == LOOT_SLOT_ITEM then
 			r, g, b, hex = C_Item.GetItemQualityColor(slotData.quality or 0)
 
-			text_name = ('|c%s%s|r'):format(hex, slotData.name)
+			text_name = slotData.secret and slotData.name or ('|c%s%s|r'):format(hex, slotData.name)
 
 			if opt.loot_texts_newlook and not slotData.secret and slotData.link and XLoot.IsNewAppearance(slotData.link) then
 				text_name = text_name..NEW_LOOK
@@ -757,7 +773,7 @@ do
 		self.text_bind:SetText(text_bind)
 		self.text_quantity:SetText(slotData.quantity > 1 and slotData.quantity or nil)
 		if opt.loot_texts_sell and slotData.slotType == LOOT_SLOT_ITEM and slotData.sellPrice and slotData.sellPrice > 0 then
-			self.text_sell:SetText(XLoot.CopperToString(slotData.sellPrice * slotData.quantity))
+			self.text_sell:SetText(XLoot.MoneyString(slotData.sellPrice * slotData.quantity, XLoot.opt.value_coin_icons))
 		else
 			self.text_sell:SetText()
 		end

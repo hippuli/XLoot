@@ -81,7 +81,7 @@ locales.ruRU["bind_on_pickup_short"] = "БоП"
 locales.ruRU["bind_on_use_short"] = "Становится персональным при использовании"
 locales.ruRU["button_close"] = "Закрыть"
 locales.ruRU["button_link"] = "Ссылка"
-locales.ruRU["linkall_threshold_missed"] = "Нет добычи, удовлетворяющей установленному порогу качества"
+locales.ruRU["linkall_threshold_missed"] = "Ни один предмет не соответствует Вашему порогу качества"
 
 -- Frame
 locales.zhCN["bind_on_equip_short"] = "装备后绑定"

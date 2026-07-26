@@ -1,8 +1,8 @@
 ## Interface: 11509, 20506, 50504, 120100, 120007, 120005
-## Title: XLoot Master
-## Notes: Configurable Master Looter interface
+## Title: XLoot Toast
+## Notes: Blizzard-style toast pop-ups for notable loot you receive
 ## Version: 12.13.1
-## Author: Xuerian, Dridzt
+## Author: Wheelbarrel00
 ## X-Category: Inventory
 
 ## Dependencies: XLoot

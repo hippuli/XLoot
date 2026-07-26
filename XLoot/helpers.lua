@@ -30,6 +30,14 @@ function XLoot.CopperToString(copper)
 	return table_concat(buffer, ", ")
 end
 
+local GetCoinTextureString = GetCoinTextureString
+function XLoot.MoneyString(copper, icons)
+	if icons and GetCoinTextureString then
+		return GetCoinTextureString(copper)
+	end
+	return XLoot.CopperToString(copper)
+end
+
 -- Scanning tooltip must live outside the UIParent tree, or the tooltip refresh cycle perpetually re-processes dynamic content (weapon imbues, temp buffs, tradeable timers).
 XLootTooltip = CreateFrame('GameTooltip', 'XLootTooltip', nil, 'GameTooltipTemplate')
 local tooltip = XLootTooltip
@@ -266,6 +274,34 @@ function XLoot.CompareVersions(a, b)
 		local an, bn = tonumber(a_part) or 0, tonumber(b_part) or 0
 		if an ~= bn then
 			return an > bn and 1 or -1
+		end
+	end
+end
+
+-- Shared Blizzard loot-toast suppression, reference-counted so Monitor and Toast can each request it without
+-- clobbering the other. The AddAlert wrapper is installed once and never restored, so toggling a source off can
+-- not clobber another addon's later hook. LegendaryItemAlertSystem is retail-only; MoP routes legendaries through
+-- LootAlertSystem.
+do
+	local requesters = {}
+	local hooked = {}
+	local systems = { "LootAlertSystem", "MoneyWonAlertSystem", "LootUpgradeAlertSystem", "LegendaryItemAlertSystem" }
+	local function suppressing()
+		return next(requesters) ~= nil
+	end
+	function XLoot.SuppressLootToasts(source, want)
+		requesters[source] = want or nil
+		if not suppressing() then return end
+		for _, name in ipairs(systems) do
+			local system = _G[name]
+			if system and system.AddAlert and not hooked[name] then
+				hooked[name] = true
+				local original = system.AddAlert
+				system.AddAlert = function(...)
+					if suppressing() then return end
+					return original(...)
+				end
+			end
 		end
 	end
 end

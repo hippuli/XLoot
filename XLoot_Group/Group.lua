@@ -6,15 +6,24 @@ XLootGroup = addon
 local opt, anchor, alert_anchor, mouse_focus, Skinner
 local rolls = {}
 local auto_rolled = {}
+local pending_rolls = {}
+local drop_to_roll = {}
+local FakeHistory
+local fake_seq = 0
 local GetLootRollItemInfo, GetLootRollItemLink, GetLootRollTimeLeft, RollOnLoot, UnitGroupRolesAssigned, print, string_format
 	= GetLootRollItemInfo, GetLootRollItemLink, GetLootRollTimeLeft, RollOnLoot, UnitGroupRolesAssigned, print, string.format
--- C_LootHistory is nil on some Classic builds; indexing it at file load would crash the module.
+-- C_LootHistory is nil on some Classic builds, so indexing it at file load would crash the module.
 local HistoryGetItem = C_LootHistory and C_LootHistory.GetItem
 local HistoryGetPlayerInfo = C_LootHistory and C_LootHistory.GetPlayerInfo
 local HistoryGetNumItems = C_LootHistory and C_LootHistory.GetNumItems
+-- Retail only, added in 10.1.0. Nil on Classic.
+local HistoryGetSortedInfoForDrop = C_LootHistory and C_LootHistory.GetSortedInfoForDrop
 local CanEquipItem, IsItemUpgrade, FancyPlayerName = XLoot.CanEquipItem, XLoot.IsItemUpgrade, XLoot.FancyPlayerName
 local IsIlvlUpgrade, IsNewAppearance, TimeFractionColor = XLoot.IsIlvlUpgrade, XLoot.IsNewAppearance, XLoot.TimeFractionColor
 local RollFramePrototype
+-- Defined in the retail roll-status block, used above it.
+local HoldForResult
+local AWAIT_TIMEOUT = 360 -- seconds, past the longest retail roll window
 
 local BUILD_NUMBER = select(4, GetBuildInfo())
 local IS_RETAIL = WOW_PROJECT_ID == WOW_PROJECT_MAINLINE
@@ -24,12 +33,12 @@ local HAS_TRANSMOG = IS_RETAIL
 local GetItemInfo = C_Item and C_Item.GetItemInfo or GetItemInfo
 local GetDetailedItemLevelInfo = C_Item and C_Item.GetDetailedItemLevelInfo or GetDetailedItemLevelInfo
 local GetItemInfoInstant = C_Item and C_Item.GetItemInfoInstant or GetItemInfoInstant
-local issecret = issecretvalue -- 12.0 secret values; nil pre-12.0
+local issecret = issecretvalue -- 12.0 secret values, nil pre-12.0
 
 local ENUM_LOOT_GROUP = Enum and Enum.LootMethod and Enum.LootMethod.Group
 local ENUM_LOOT_NEEDBEFOREGREED = Enum and Enum.LootMethod and Enum.LootMethod.Needbeforegreed
 
--- The string GetLootMethod() global is gone on modern Classic/retail builds; prefer the C_PartyInfo enum, fall back to the global.
+-- The string GetLootMethod() global is gone on modern Classic/retail builds. Prefer the C_PartyInfo enum, fall back to the global.
 local function RollBasedLootMethod()
 	if ENUM_LOOT_GROUP and C_PartyInfo and C_PartyInfo.GetLootMethod then
 		local method = C_PartyInfo.GetLootMethod()
@@ -104,6 +113,7 @@ local defaults = {
 			y = AlertFrame:GetTop()
 		},
 
+		roll_status = false,
 		track_all = false,
 		track_player_roll = false,
 		track_by_threshold = true,
@@ -129,6 +139,31 @@ function addon:OnInitialize()
 	XLoot:SetSlashCommand("xlg", self.SlashHandler)
 end
 
+-- GroupLootFrame1..N are UIParent frames only anchored into GroupLootContainer, so hiding the container never suppressed them and only collided with bonus rolls, which anchor into that same container. Hide the roll frames directly and catch any re-show. A reload or zone-in during a roll rebuilds them via frame:Show outside START_LOOT_ROLL, which the frame hook catches.
+local function HideRollFrame(frame)
+	frame:Hide()
+	-- Route through RemoveFrame so the invisible layout container self-collapses, without ever hooking its Show.
+	if GroupLootContainer and GroupLootContainer_RemoveFrame then
+		GroupLootContainer_RemoveFrame(GroupLootContainer, frame)
+	end
+end
+
+local roll_ui_hooked = false
+local function SuppressDefaultRollUI()
+	for i = 1, (NUM_GROUP_LOOT_FRAMES or 4) do
+		local f = _G["GroupLootFrame"..i]
+		if f then
+			f:UnregisterAllEvents()
+			HideRollFrame(f)
+			if not roll_ui_hooked then
+				hooksecurefunc(f, "Show", HideRollFrame)
+			end
+		end
+	end
+	-- Only mark hooked once the frames exist, or a call before Blizzard creates them would skip hooking for good.
+	if _G["GroupLootFrame1"] then roll_ui_hooked = true end
+end
+
 function addon:OnEnable()
 	-- Register events
 	eframe:RegisterEvent('START_LOOT_ROLL')
@@ -138,6 +173,7 @@ function addon:OnEnable()
 	if IS_RETAIL then
 		eframe:RegisterEvent('CANCEL_LOOT_ROLL')
 		eframe:RegisterEvent('CANCEL_ALL_LOOT_ROLLS')
+		self:UpdateRetailStatusEvents()
 	elseif C_LootHistory then
 		eframe:RegisterEvent('LOOT_HISTORY_ROLL_CHANGED')
 		eframe:RegisterEvent('LOOT_HISTORY_ROLL_COMPLETE')
@@ -147,6 +183,8 @@ function addon:OnEnable()
 	-- Disable default frame
 	UIParent:UnregisterEvent("START_LOOT_ROLL")
 	UIParent:UnregisterEvent("CANCEL_LOOT_ROLL")
+	SuppressDefaultRollUI()
+	eframe:RegisterEvent('PLAYER_ENTERING_WORLD')
 
 	-- Set up skins
 	Skinner = {}
@@ -252,9 +290,19 @@ end
 
 function addon:START_LOOT_ROLL(id, length, ongoing)
 	local icon, name, count, quality, bop, need, greed, de, reason_need, reason_greed, reason_de, de_skill, can_transmog = GetLootRollItemInfo(id)
-	-- LootFrame.lua includes this sanity check (== nil is a blocked op on a secret name; not is allowed)
-	if not name then
-		print('XLoot Group: Ignoring START_LOOT_ROLL with no name')
+	-- LootFrame.lua includes this sanity check (== nil is a blocked op on a secret name, not is allowed)
+	if not name or (issecret and issecret(name)) then
+		-- a secret value (tainted 12.0 roll) can't be built, so bail. A plain nil name just means the item is not cached yet, so wait for it and retry instead of dropping the roll until a reload
+		local link = GetLootRollItemLink(id)
+		local itemid = link and not (issecret and issecret(link)) and GetItemInfoInstant(link)
+		if itemid and pending_rolls[id] ~= itemid and Item then
+			pending_rolls[id] = itemid
+			Item:CreateFromItemID(itemid):ContinueOnItemLoad(function()
+				local remaining = GetLootRollTimeLeft(id)
+				if remaining > 0 then addon:START_LOOT_ROLL(id, remaining, true) end
+				pending_rolls[id] = nil
+			end)
+		end
 		return
 	end
 	local link = GetLootRollItemLink(id)
@@ -276,13 +324,14 @@ function addon:START_LOOT_ROLL(id, length, ongoing)
 	end
 
 	local start = length
-	if ongoing then
+	-- The retail START_LOOT_ROLL event passes a lootHandle third, so only a literal true means ongoing.
+	if ongoing == true then
 		if not (issecret and issecret(quality)) and quality == 2 then
 			length = 60000
 		else
 			length = 180000
 		end
-		-- Reload only knows remaining time; the assumed total can't be less than it
+		-- Reload only knows remaining time, so the assumed total cannot be less than it
 		if start > length then length = start end
 	end
 	length, start = length/1000, start/1000
@@ -345,6 +394,9 @@ function addon:START_LOOT_ROLL(id, length, ongoing)
 	frame.over = nil
 	frame.have_rolled = false
 	frame.lead_type = 'pass'
+	frame.drop_key = nil
+	frame.awaiting = nil
+	frame.await_until = nil
 
 	frame.text_bind:SetText(bop and '|cffff4422BoP' or '')
 	frame.text_loot:SetText(name)
@@ -369,17 +421,32 @@ end
 
 function addon:CANCEL_LOOT_ROLL(id)
 	auto_rolled[id] = nil
+	pending_rolls[id] = nil
 	local frame = rolls[id]
-	if frame then
-		anchor:Pop(frame)
+	-- An over frame is owned by the fader, and popping it here would strand a stale expiry on the recycled frame.
+	if frame and not frame.over then
+		-- Retail cancels the roll the moment you choose but names the winner much later.
+		if opt.roll_status and frame.drop_key then
+			if not frame.awaiting then HoldForResult(frame) end
+		else
+			anchor:Pop(frame)
+		end
 	end
 end
 
 function addon:CANCEL_ALL_LOOT_ROLLS()
 	wipe(auto_rolled)
+	wipe(pending_rolls)
+	wipe(drop_to_roll)
 	for _, frame in pairs(rolls) do
-		anchor:Pop(frame)
+		if not frame.over then
+			anchor:Pop(frame)
+		end
 	end
+end
+
+function addon:PLAYER_ENTERING_WORLD()
+	SuppressDefaultRollUI()
 end
 
 -- Rules change from shift-clicks outside the options dialog, so nudge AceConfig to redraw the live list.
@@ -565,6 +632,185 @@ function addon:LOOT_HISTORY_ROLL_CHANGED(hid, pid)
 	-- Refresh tooltip
 	if frame and mouse_focus == frame then
 		frame:OnEnter()
+	end
+end
+
+local retail_state_type
+do
+	local S = Enum and Enum.EncounterLootDropRollState
+	if S then
+		retail_state_type = {
+			[S.NeedMainSpec] = 'need',
+			[S.NeedOffSpec] = 'need',
+			[S.Transmog] = 'transmog',
+			[S.Greed] = 'greed',
+			[S.Pass] = 'pass'
+		}
+	end
+end
+
+local function DropKey(encounterID, lootListID)
+	return (encounterID or 0) * 100000 + (lootListID or 0)
+end
+
+local function DropItemID(link)
+	if not link or (issecret and issecret(link)) then return nil end
+	return GetItemInfoInstant(link)
+end
+
+-- rollID and lootListID are unrelated ID spaces with no bridge, so drops join by item link.
+-- Without bind a completed drop is never bound fresh, so a late winner cannot attach to an unrelated new roll.
+local function ResolveRetailFrame(encounterID, lootListID, link, bind)
+	local key = DropKey(encounterID, lootListID)
+	local cached = drop_to_roll[key]
+	if cached and rolls[cached.rollid] == cached then
+		return cached
+	end
+	if not bind then return nil end
+	local want = DropItemID(link)
+	if not want then return nil end
+	-- Oldest match first so duplicate identical drops bind FIFO, and never rebind a completed frame.
+	local best
+	for id, frame in pairs(rolls) do
+		if not frame.drop_key and not frame.over and DropItemID(frame.link) == want and (not best or id < best.rollid) then
+			best = frame
+		end
+	end
+	if best then
+		best.drop_key = key
+		drop_to_roll[key] = best
+	end
+	return best
+end
+
+local win_icons = {
+	need = [[|TInterface\Buttons\UI-GroupLoot-Dice-Up:16:16:-1:-1|t]],
+	greed = [[|TInterface\Buttons\UI-GroupLoot-Coin-Up:16:16:-1:-2|t]],
+	transmog = [[|TInterface\MINIMAP\TRACKING\Transmogrifier:16:16:-1:-1|t]]
+}
+
+local function HideRollButtons(frame)
+	frame.need:Hide()
+	frame.greed:Hide()
+	if frame.disenchant then frame.disenchant:Hide() end
+	if frame.transmog then frame.transmog:Hide() end
+	frame.pass:Hide()
+	frame.text_status:Show()
+end
+
+function HoldForResult(frame)
+	frame.awaiting = true
+	frame.await_until = GetTime() + AWAIT_TIMEOUT
+	HideRollButtons(frame)
+	frame.text_status:SetText(L.awaiting)
+	frame.text_status:SetTextColor(.7, .7, .7)
+	frame.bar.spark:Hide()
+	frame.bar:SetValue(0)
+	frame.text_time:SetText()
+end
+
+local function CompleteRetailDrop(frame, drop)
+	if frame.over then return end
+	frame.over = true
+	frame.awaiting = nil
+	HideRollButtons(frame)
+	frame.bar.expires = GetTime()
+
+	local winner = drop.winner
+	if not winner or drop.allPassed then
+		frame.text_status:SetText(string_format('%s: %s', PASS, ALL))
+		frame.text_status:SetTextColor(.7, .7, .7)
+		anchor:Expire(frame, opt.expire_lost)
+	elseif issecret and (issecret(winner.playerName) or issecret(winner.playerClass)) then
+		frame.text_status:SetText(UNKNOWN or '?')
+		frame.text_status:SetTextColor(.7, .7, .7)
+		anchor:Expire(frame, opt.expire_lost)
+	else
+		local player, r, g, b = FancyPlayerName(winner.playerName, winner.playerClass, opt)
+		if opt.win_icon then
+			local icon = win_icons[retail_state_type and retail_state_type[winner.state]]
+			if icon then player = icon..player end
+		end
+		frame.text_status:SetText(player)
+		frame.text_status:SetTextColor(r, g, b)
+		anchor:Expire(frame, winner.isSelf and opt.expire_won or opt.expire_lost)
+	end
+	if mouse_focus == frame then frame:OnEnter() end
+end
+
+-- Split out so the /xlgd harness can drive a preview without toggling the option on.
+local function ProcessRetailDrop(encounterID, lootListID)
+	if not HistoryGetSortedInfoForDrop then return end
+	local drop = HistoryGetSortedInfoForDrop(encounterID, lootListID)
+	if not drop then return end
+	local completed = drop.winner or drop.allPassed
+	local frame = ResolveRetailFrame(encounterID, lootListID, drop.itemHyperlink, not completed)
+	if not frame or frame.over then return end
+
+	if completed then
+		CompleteRetailDrop(frame, drop)
+		return
+	end
+
+	-- Held bars have no buttons left to count on, so track the current leader instead.
+	if frame.awaiting then
+		local leader = drop.currentLeader
+		if leader and not (issecret and (issecret(leader.playerName) or issecret(leader.playerClass))) then
+			local player, r, g, b = FancyPlayerName(leader.playerName, leader.playerClass, opt)
+			if opt.win_icon then
+				local icon = win_icons[retail_state_type and retail_state_type[leader.state]]
+				if icon then player = icon..player end
+			end
+			frame.text_status:SetText(player)
+			frame.text_status:SetTextColor(r, g, b)
+		end
+		if mouse_focus == frame then frame:OnEnter() end
+		return
+	end
+
+	local need, greed, transmog, pass = 0, 0, 0, 0
+	local infos = drop.rollInfos
+	if infos and retail_state_type then
+		for i = 1, #infos do
+			local t = retail_state_type[infos[i].state]
+			if t == 'need' then need = need + 1
+			elseif t == 'greed' then greed = greed + 1
+			elseif t == 'transmog' then transmog = transmog + 1
+			elseif t == 'pass' then pass = pass + 1 end
+		end
+	end
+	frame.need:SetText(need)
+	frame.greed:SetText(greed)
+	if frame.transmog then frame.transmog:SetText(transmog) end
+	frame.pass:SetText(pass)
+	if mouse_focus == frame then frame:OnEnter() end
+end
+
+function addon:LOOT_HISTORY_UPDATE_DROP(encounterID, lootListID)
+	if opt.roll_status then
+		ProcessRetailDrop(encounterID, lootListID)
+	end
+end
+
+function addon:LOOT_HISTORY_CLEAR_HISTORY()
+	wipe(drop_to_roll)
+	for _, frame in pairs(rolls) do
+		frame.drop_key = nil
+	end
+end
+
+function addon:UpdateRetailStatusEvents()
+	if not IS_RETAIL or not HistoryGetSortedInfoForDrop then return end
+	if opt.roll_status then
+		eframe:RegisterEvent('LOOT_HISTORY_UPDATE_DROP')
+		eframe:RegisterEvent('LOOT_HISTORY_CLEAR_HISTORY')
+	else
+		eframe:UnregisterEvent('LOOT_HISTORY_UPDATE_DROP')
+		eframe:UnregisterEvent('LOOT_HISTORY_CLEAR_HISTORY')
+		-- No result can arrive once the events are gone, so held bars would sit until they time out.
+		for _, frame in pairs(rolls) do
+			if frame.awaiting then anchor:Pop(frame) end
+		end
 	end
 end
 
@@ -952,9 +1198,24 @@ do
 			return
 		end
 		local time = GetTime()
+		-- The timeout is the only way out of a held bar if a result never lands.
+		if parent.awaiting then
+			self.spark:Hide()
+			self:SetValue(0)
+			parent.text_time:SetText()
+			if time > (parent.await_until or 0) then
+				anchor:Pop(parent)
+			end
+			return
+		end
 		-- TODO: Remove?
 		local status, result = pcall(GetLootRollTimeLeft, parent.rollid)
 		if not status or result == 0 then
+			-- Rolling closes the local roll, so a Need with no cancel event lands here.
+			if opt.roll_status and parent.drop_key then
+				HoldForResult(parent)
+				return
+			end
 			local ended = parent.rollended
 			if ended then
 				if time - ended > 10 then
@@ -995,6 +1256,15 @@ do
 
 	function RollFramePrototype:Popped()
 		rolls[self.rollid] = nil
+		if FakeHistory then
+			FakeHistory.rolls[self.rollid] = nil
+			FakeHistory.links[self.rollid] = nil
+		end
+		if self.drop_key then
+			drop_to_roll[self.drop_key] = nil
+			if FakeHistory then FakeHistory.drops[self.drop_key] = nil end
+			self.drop_key = nil
+		end
 	end
 
 	-- Create roll frame
@@ -1147,7 +1417,7 @@ function addon:SkinUpdate()
 		bar:SetPoint('LEFT', bar.parent.icon_frame, 'RIGHT', -padding, 0)
 		bar:SetStatusBarTexture(skin.bar_texture)
 		local link = bar.parent.link
-		if link then
+		if link and not (issecret and issecret(link)) then
 			local r, g, b = C_Item.GetItemQualityColor(select(3, GetItemInfo(link)))
 			local br, bg, bb = RollBorderColor(link, r, g, b)
 			bar.parent.overlay:SetBorderColor(br, bg, bb)
@@ -1162,6 +1432,8 @@ function addon:ApplyOptions()
 	opt = self.opt
 
 	if not anchor then return end
+
+	self:UpdateRetailStatusEvents()
 
 	anchor:UpdateSVData(opt.roll_anchor)
 	alert_anchor:UpdateSVData(opt.alert_anchor)
@@ -1181,7 +1453,7 @@ end
 ---------------------------------------------------------------------------
 -- Test rolls
 ---------------------------------------------------------------------------
-local preview_loot = {
+local preview_loot = IS_RETAIL and {
 	{ 249288, true, true, true, true },
 	{ 258412, true, true, true, true },
 	{ 193701, false, true, true, true },
@@ -1190,6 +1462,13 @@ local preview_loot = {
 	{ 260188, true, true, true, true },
 	{ 249659, true, true, true, false },
 	{ 249626, false, true, true, true }
+} or {
+	-- Low classic-safe IDs with a spread of quality and item types
+	{ 17204, true, true, true, true },
+	{ 2244, false, true, true, true },
+	{ 69818, false, false, true, false },
+	{ 18332, false, true, false, true },
+	{ 14256, false, false, true, true }
 }
 -- Activate items
 for i, t in ipairs(preview_loot) do
@@ -1202,7 +1481,6 @@ local deframe = CreateFrame('Frame')
 
 -- Currently only debugs one roll at a time.
 function XLootGroup.TestSettings()
-	local FakeHistory
 	local schedule = {}
 	local type_index = { 'need', 'greed', 'disenchant', [0] = 'pass' }
 	if not init then
@@ -1227,7 +1505,8 @@ function XLootGroup.TestSettings()
 		FakeHistory = {
 			rolls = {},
 			links = {},
-			items = {}
+			items = {},
+			drops = {}
 		}
 
 		local function after(seconds, func, target, ...)
@@ -1238,11 +1517,19 @@ function XLootGroup.TestSettings()
 			addon:LOOT_HISTORY_ROLL_CHANGED(...)
 		end
 
+		-- An orphaned fake drop must never join a real roll of the same item and fake a winner onto it.
+		local function updated(enc, list)
+			local frame = drop_to_roll[DropKey(enc, list)]
+			if frame and rolls[frame.rollid] == frame then
+				ProcessRetailDrop(enc, list)
+			end
+		end
+
 		-- Test overrides fall through to the real API for non-fake IDs, so /xlgd can't break live rolls
 		local _GetLootRollItemInfo, _GetLootRollItemLink, _GetLootRollTimeLeft, _RollOnLoot,
-			_UnitGroupRolesAssigned, _HistoryGetItem, _HistoryGetPlayerInfo
+			_UnitGroupRolesAssigned, _HistoryGetItem, _HistoryGetPlayerInfo, _HistoryGetSortedInfoForDrop
 			= GetLootRollItemInfo, GetLootRollItemLink, GetLootRollTimeLeft, RollOnLoot,
-			UnitGroupRolesAssigned, HistoryGetItem, HistoryGetPlayerInfo
+			UnitGroupRolesAssigned, HistoryGetItem, HistoryGetPlayerInfo, HistoryGetSortedInfoForDrop
 
 		function GetLootRollItemInfo(id)
 			if FakeHistory.rolls[id] then return unpack(FakeHistory.rolls[id]) end
@@ -1289,13 +1576,21 @@ function XLootGroup.TestSettings()
 			return _HistoryGetPlayerInfo and _HistoryGetPlayerInfo(hid, pid)
 		end
 
+		function HistoryGetSortedInfoForDrop(encounterID, lootListID)
+			local drop = FakeHistory.drops[DropKey(encounterID, lootListID)]
+			if drop then return drop end
+			return _HistoryGetSortedInfoForDrop and _HistoryGetSortedInfoForDrop(encounterID, lootListID)
+		end
+
 		function StartFakeRoll(index)
 			local fake = {}
 
 			local item = preview_loot[index or random(1, #preview_loot)]
 			local iname, ilink, iquality, _, _, _, _, _, _, itex = GetItemInfo(item[1])
 
-			local rollid = #FakeHistory.rolls + 1
+			-- count up from a high base so fake ids never collide with real loot-roll ids
+			fake_seq = fake_seq + 1
+			local rollid = 1000000 + fake_seq
 
 			fake.item = { rollid, ilink, 5, false, nil, false }
 			fake.players = {
@@ -1310,12 +1605,39 @@ function XLootGroup.TestSettings()
 
 			table.insert(FakeHistory.items, 1, fake)
 
-			addon:START_LOOT_ROLL(rollid, random(20000, 40000), true)
+			local fake_frame = addon:START_LOOT_ROLL(rollid, random(20000, 40000), true)
 			if not IS_RETAIL then
 				after(5, function() fake.players[2][3] = 0 end, changed, 1, 2)
 				after(7, function() fake.players[3][3] = 2 end, changed, 1, 3)
 				after(9, function() fake.players[4][3] = 3 end, changed, 1, 4)
 				after(11, function() fake.players[5][3] = 1 end, changed, 1, 5)
+			else
+				local S = Enum and Enum.EncounterLootDropRollState
+				if S and fake_frame then
+					local enc, list = 88888, rollid
+					local key = DropKey(enc, list)
+					local drop = { lootListID = list, itemHyperlink = ilink, rollInfos = {}, allPassed = false }
+					FakeHistory.drops[key] = drop
+					-- Bind up front so the fake drop resolves by cache and never scans real bars.
+					fake_frame.drop_key = key
+					drop_to_roll[key] = fake_frame
+					local infos = drop.rollInfos
+					local variant = index or 1
+					if variant % 3 == 0 then
+						after(3, function() infos[#infos+1] = { playerName = 'Player1', playerClass = 'MAGE', state = S.Pass } end, updated, enc, list)
+						after(5, function() infos[#infos+1] = { playerName = 'Player2', playerClass = 'PRIEST', state = S.Pass } end, updated, enc, list)
+						after(7, function() drop.allPassed = true end, updated, enc, list)
+					else
+						local me = { playerName = UnitName("player"), playerClass = select(2, UnitClass('player')), state = S.NeedMainSpec, roll = 71, isSelf = true }
+						local rival = { playerName = 'Player2', playerClass = 'PRIEST', state = S.NeedMainSpec, roll = 88, isSelf = false }
+						local winner = variant % 2 == 0 and me or rival
+						winner.isWinner = true
+						after(3, function() infos[#infos+1] = { playerName = 'Player1', playerClass = 'MAGE', state = S.Greed, roll = 42 } end, updated, enc, list)
+						after(5, function() infos[#infos+1] = rival end, updated, enc, list)
+						after(7, function() infos[#infos+1] = me end, updated, enc, list)
+						after(9, function() drop.winner = winner end, updated, enc, list)
+					end
+				end
 			end
 		end
 
@@ -1326,4 +1648,5 @@ function XLootGroup.TestSettings()
 end
 
 XLoot:SetSlashCommand('xlgd', XLootGroup.TestSettings)
+
 

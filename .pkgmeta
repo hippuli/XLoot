@@ -7,3 +7,4 @@ move-folders:
   XLoot/XLoot_Master: XLoot_Master
   XLoot/XLoot_Monitor: XLoot_Monitor
   XLoot/XLoot_Options: XLoot_Options
+  XLoot/XLoot_Toast: XLoot_Toast

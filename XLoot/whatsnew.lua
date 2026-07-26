@@ -6,6 +6,77 @@ local XLoot = select(2, ...)
 -- Newest first. Array order is the display order, so we never sort version strings.
 local updates = {
 	{
+		version = "12.13.0",
+		date = "2026-07-16",
+		changes = {
+			{
+				label = "Roll results on retail",
+				type = "feature",
+				option = "Group Loot > What rolls to show",
+				description = "The Group Loot roll window can show who rolled and who won again on retail. Roll counts build on the Need, Greed, and Transmog buttons, then the window names the winner in their class color, or shows Pass: All if nobody wanted it. Retail closes your roll the moment you choose but does not decide it until everyone has rolled, so the window now waits for the result and shows the current leader while it waits. Off by default. Try /xlgd to preview.",
+			},
+			{
+				label = "Retail roll timer bars start full",
+				type = "bugfix",
+				description = "Fresh retail roll windows could start with a partly filled timer bar. XLoot was reading a value in Blizzard's roll event as its own resumed-roll flag, which replaced the roll's real length with an assumed one.",
+			},
+		},
+	},
+	{
+		version = "12.12.0",
+		date = "2026-07-11",
+		changes = {
+			{
+				label = "Loot toasts",
+				type = "feature",
+				option = "Loot Toasts",
+				description = "A new optional module pops a Blizzard-style toast when you receive notable loot, with the icon, name, count, and quality border. Plenty to tune - quality threshold, item level, how many show at once, time on screen, sound and animation, and how they respond to the mouse. Off by default. Try /xltd to preview. Thanks to HOPE for the request.",
+			},
+			{
+				label = "Item values as coin icons",
+				type = "feature",
+				option = "XLoot options",
+				description = "Item values can show as gold, silver, and copper coin icons instead of plain text, on the loot row sell price and the Classic tooltip. Off by default. Thanks to 1Holy-Z for the request.",
+			},
+			{
+				label = "Bonus Roll restored on retail",
+				type = "bugfix",
+				description = "The retail Bonus Roll (coin-spin) frame was being hidden by XLoot's roll-frame suppression. It shows again. Thanks to Itamae and RoadBlock.",
+			},
+			{
+				label = "Auto-announce channel fix",
+				type = "bugfix",
+				description = "Announcing loot to a Raid Warning channel outside a raid could silently fail. XLoot now downgrades or skips channels you cannot post to. Thanks to Itamae.",
+			},
+		},
+	},
+	{
+		version = "12.11.1",
+		date = "2026-07-10",
+		changes = {
+			{
+				label = "Roll frames now appear on Classic zone-ins",
+				type = "bugfix",
+				description = "Group Loot roll frames could go missing when an item was not cached yet, like zoning into a dungeon with rolls already in progress. The roll now waits for the item to load and retries instead of being dropped until a reload. Thanks to RoadBlock for the fix and testing.",
+			},
+			{
+				label = "Group Loot test preview works on Classic",
+				type = "bugfix",
+				description = "The roll test button drew nothing on Classic because its sample items only existed on retail. It now uses items that exist on Classic clients. Thanks to RoadBlock for the item set.",
+			},
+			{
+				label = "No more doubled default roll frames",
+				type = "bugfix",
+				description = "Blizzard's own loot roll frames no longer show up next to XLoot's after a reload or zone-in during an active roll.",
+			},
+			{
+				label = "AddOns list category and icon",
+				type = "improvement",
+				description = "XLoot and its modules now group together under a category with an icon in the game's addon list. Thanks to RoadBlock for the suggestion.",
+			},
+		},
+	},
+	{
 		version = "12.11.0",
 		date = "2026-07-08",
 		changes = {
@@ -284,7 +355,8 @@ local function build()
 	f:Hide()
 
 	f:SetBackdrop({
-		bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+		-- Solid fill, the tooltip background texture stays see-through even at full backdrop alpha
+		bgFile = "Interface\\Buttons\\WHITE8X8",
 		edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
 		tile = true, tileSize = 16, edgeSize = 14,
 		insets = { left = 4, right = 4, top = 4, bottom = 4 },
