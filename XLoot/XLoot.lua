@@ -4,14 +4,14 @@ _G.XLoot = XLoot
 local L = XLoot.L
 local print, wprint = print, print
 
--------------------------------------------------------------------------------
--- Settings
 local defaults = {
 	profile = {
 		skin = "smooth",
 		skin_anchors = false,
 		tooltip_sell = false,
 		value_coin_icons = false,
+		minimap_icon = false,
+		minimap = { hide = true },
 		whatsnew_mode = "popup",
 	},
 	global = {
@@ -52,10 +52,6 @@ function XLoot:ShowDiscord()
 	StaticPopup_Show("XLOOT_DISCORD")
 end
 
--------------------------------------------------------------------------------
--- Module helpers
-
--- Return module localization with new module
 local _NewModule = XLoot.NewModule
 ---@return XLootModule module
 ---@return table localization
@@ -69,7 +65,6 @@ function XLoot:GetModule(module_name, ...)
 	return module_name == "Core" and XLoot or _GetModule(self, module_name, ...)
 end
 
--- Set up basic event handler
 local function SetEventHandler(addon, frame)
 	if not frame then
 		frame = CreateFrame("Frame")
@@ -99,12 +94,10 @@ end
 
 function XLoot:ApplyOptions(in_options)
 	self.opt = self.db.profile
-	-- Update skin
 	XLoot:SetSkin(self.opt.skin)
 	for _,v in ipairs(XLoot.skinners) do
 		v:Reskin()
 	end
-	-- Update all modules
 	for k,v in pairs(XLoot.modules) do
 		if v.db then
 			v.opt = v.db.profile
@@ -113,32 +106,26 @@ function XLoot:ApplyOptions(in_options)
 			v:ApplyOptions(in_options)
 		end
 	end
+	self:UpdateMinimapIcon()
 end
 
--- Add shortcuts for modules
 ---@class XLootModule: AceAddon
 local XLootModule = {
 	opt = {},
 	InitializeModule = function(self, defaults, frame)
 		local module_name = self:GetName()
-		-- Set up DB namespace
 		self.db = XLoot.db:RegisterNamespace(module_name, defaults)
 		self.opt = self.db.profile
 
 		function self.ShowOptions()
 			XLoot:ShowOptionPanel(self)
 		end
-		-- Default slash command
 		XLoot:SetSlashCommand(("XLoot"..module_name):lower(), self.ShowOptions)
-		-- Set event handler
 		self:SetEventHandler(frame)
 	end,
 	SetEventHandler = SetEventHandler,
 }
 XLoot:SetDefaultModulePrototype(XLootModule)
-
--------------------------------------------------------------------------------
--- Prototype helper
 
 function XLoot.Prototype_New(self, new)
 	local new = new or {}
@@ -157,22 +144,16 @@ function XLoot.NewPrototype()
 	return { New = XLoot.Prototype_New, _New = XLoot.Prototype_New }
 end
 
--------------------------------------------------------------------------------
--- Addon init
-
 function XLoot:OnInitialize()
-	-- Init DB
 	self.db = LibStub("AceDB-3.0"):New("XLootADB", defaults, true)
 	self.opt = self.db.profile
 	self.db.RegisterCallback(self, "OnProfileChanged", "ApplyOptions")
 	self.db.RegisterCallback(self, "OnProfileCopied", "ApplyOptions")
 	self.db.RegisterCallback(self, "OnProfileReset", "ApplyOptions")
-	-- Load skins, import Masque skins
 	self:SkinsOnInitialize()
 end
 
 function XLoot:OnEnable()
-	-- Check for old addons
 	for _,name in ipairs({ "XLoot1.0", "XLootGroup", "XLootMaster", "XLootMonitor" }) do
 		if C_AddOns.IsAddOnLoaded(name) then
 			C_AddOns.DisableAddOn(name)
@@ -184,6 +165,7 @@ function XLoot:OnEnable()
 	C_AddOns.LoadAddOn("XLoot_Options")
 	self:SetSlashCommand("xloot", function() self:ShowOptionPanel(self) end)
 
+	self:SetupMinimapIcon()
 	self:CheckWhatsNew()
 end
 
