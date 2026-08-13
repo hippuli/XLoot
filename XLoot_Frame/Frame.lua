@@ -235,11 +235,13 @@ function addon:ApplyOptions(in_options)
 		XLootFrame:Update(true)
 	end
 	XLootFrame:ParseAutolootList()
-	if in_options then
+	-- A profile change also lands here, and the preview frame only exists once the options panel has been shown.
+	if in_options and XLootFakeFrame then
 		local Fake = XLootFakeFrame
 		Fake.opt = opt
 		Fake:UpdateAppearance()
 		local slot, max_width, max_quality = 0, 0, 0
+		wipe(Fake.slots)
 		for i,v in ipairs(preview_loot) do
 			local t = GetItemInfoTable(v[1])
 			-- local itemName, itemLink, itemRarity, itemLevel, itemMinLevel, itemType, itemSubType, itemStackCount, itemEquipLoc, itemTexture, itemSellPrice = GetItemInfo(v[1])
@@ -271,7 +273,7 @@ function addon:ApplyOptions(in_options)
 						slotType = LOOT_SLOT_CURRENCY,
 						quantity = 5,
 					}))
-					Fake.slots[#preview_loot+i] = row
+					Fake.slots[slot+i] = row
 				end
 			end
 		end
@@ -1004,7 +1006,7 @@ do
 	end
 
 	function FramePrototype:UpdateAppearance()
-		self.skin = self:Reskin()
+		self.skin = self:CurrentSkin()
 		self.skin.row_offset = self.skin.row_spacing * -1
 
 		self:SetScale(self.opt.frame_scale)
@@ -1505,7 +1507,7 @@ end
 
 -- Refreshes the shift-compare tooltip without an OnUpdate on every row
 function addon:MODIFIER_STATE_CHANGED()
-	if (GetNumLootItems() ~= 0) and mouse_focus and MouseIsOver(mouse_focus) then
+	if (GetNumLootItems() ~= 0) and mouse_focus and mouse_focus:IsMouseOver() then
 		mouse_focus:ShowTooltip()
 	end
 end
@@ -1514,11 +1516,7 @@ local function option_handler(msg)
 	if not addon:SlashHandler(msg) then
 		addon:ShowOptions()
 	end
-	--local what, arg, data = string.split(' ', msg, 3)
-	--local what, arg, data = msg:match'^(%w+)%s?([A-Za-z\_]*)%s?(.*)$'
 end
--- SLASH_XLOOT1 = '/xloot'
--- SlashCmdList['XLOOT'] = option_handler
 
 
 -- LootSlotHasItem() is generic since MoP - it covers item, coin, and currency. LootSlotIsCoin() and friends are replaced by GetLootSlotType(slot) == LOOT_SLOT_* checks.
