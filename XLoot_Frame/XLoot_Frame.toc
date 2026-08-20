@@ -1,7 +1,7 @@
 ## Interface: 11509, 20506, 50504, 120100, 120007, 120005
 ## Title: XLoot Frame
 ## Notes: A customizable, skinnable loot frame.
-## Version: 12.14.3
+## Version: 12.15.0
 ## Author: Xuerian
 ## X-Category: Inventory
 
