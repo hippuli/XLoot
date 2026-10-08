@@ -1,7 +1,7 @@
 ## Interface: 11509, 16001, 20506, 50504, 120105, 120100, 120007
 ## Title: XLoot Options
 ## Notes: Configuration interface for XLoot
-## Version: 12.18.1
+## Version: 12.18.5
 ## Author: Xuerian
 ## X-Category: Inventory
 

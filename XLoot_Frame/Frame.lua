@@ -51,7 +51,7 @@ local LOOT_SLOT_CURRENCY = LOOT_SLOT_CURRENCY or Enum.LootSlotType.Currency
 
 local GetContainerNumFreeSlots = C_Container and C_Container.GetContainerNumFreeSlots or GetContainerNumFreeSlots
 -- Gate on the flavor, not the field: Classic ships the same BagIndex enum but container 5 is a bank bag there. Counted apart from the family loop because the reagent bag reports family 0.
-local REAGENT_BAG = WOW_PROJECT_ID == WOW_PROJECT_MAINLINE and Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag or nil
+local REAGENT_BAG = XLoot.IS_RETAIL_ENGINE and Enum and Enum.BagIndex and Enum.BagIndex.ReagentBag or nil
 local GetItemInfo = C_Item and C_Item.GetItemInfo or GetItemInfo
 local SendChatMessage = XLoot.SendChatMessage
 local issecret = issecretvalue -- 12.0 secret values, nil pre-12.0
@@ -960,11 +960,15 @@ do
 	end
 
 	function FramePrototype:OnHide()
-		pcall(LootFrame_OnHide)
+		if LootFrame_OnHide then
+			-- Classic's handler also hides the master-loot picker but errors on its nil self, hence the pcall.
+			pcall(LootFrame_OnHide)
+		else
+			CloseLoot()
+		end
 		for i,v in ipairs(self.rows) do
 			v:Hide()
 		end
-		-- CloseLoot()
 	end
 
 	local function BottomButton(frame, name, text, justify)
@@ -1297,7 +1301,7 @@ function XLootFrame:Update(no_snap, is_refresh, game_autoloot)
 	end
 
 	local rows, slots, slots_index = self.rows, wipe(self.slots), wipe(self.slots_index)
-	local bag_slots, reagent_free -- Only assigned if we start autolooting
+	local bag_slots, reagent_free
 
 	local auto, auto_items = auto, auto_items
 	for k,v in pairs(opt.autoloots) do
@@ -1386,9 +1390,11 @@ function XLootFrame:Update(no_snap, is_refresh, game_autoloot)
 
 					local family = C_Item.GetItemFamily(slotData.link)
 					family = (family and family <= 4096) and family or 0
-					if bag_slots[0] > 0 or (bag_slots[family] and bag_slots[family] > 0) then
+					if not (bag_slots[family] and bag_slots[family] > 0) then
+						family = 0
+					end
+					if bag_slots[family] > 0 then
 						autoloot = true
-						family = bag_slots[family] and family or 0
 						bag_slots[family] = bag_slots[family] - 1
 
 					elseif slotData.isCraftingReagent and reagent_free > 0 then
